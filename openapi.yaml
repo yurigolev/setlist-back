@@ -1,0 +1,230 @@
+openapi: 3.1.0
+info:
+  title: Setlist personal library API
+  version: 1.0.0
+  description: >-
+    Public single-library prototype. Anyone who knows the API address can read and
+    change the library. CORS only limits browser origins; it is not authentication.
+servers:
+  - url: /
+paths:
+  /health:
+    get:
+      summary: Service health
+      responses:
+        200:
+          description: New response
+          content:
+            application/json:
+              schema:
+                : 
+        '200':
+          description: Process is ready
+  /v1/songs:
+    post:
+      summary: Create a song
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SongInput' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Song' } } } }
+        '200': { description: Same idempotency key and input replayed, content: { application/json: { schema: { $ref: '#/components/schemas/Song' } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/songs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SongId'
+    patch:
+      summary: Update text fields only
+      description: Attachments are rejected and can only be changed through attachment operations.
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SongPatch' }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/Song' } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '428': { $ref: '#/components/responses/Error' }
+    delete:
+      summary: Delete a song and its active attachments
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { description: Deleted, content: { application/json: { schema: { $ref: '#/components/schemas/Deletion' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '428': { $ref: '#/components/responses/Error' }
+  /v1/library/snapshot:
+    get:
+      summary: Full consistent library snapshot
+      description: Song and attachment metadata are read in one repeatable-read transaction.
+      responses:
+        '200': { description: Complete snapshot at one library revision, content: { application/json: { schema: { $ref: '#/components/schemas/Snapshot' } } } }
+  /v1/songs/{songId}/attachments:
+    parameters:
+      - name: songId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Upload PNG, JPEG, WebP or MP3
+      description: >-
+        One file per request. Images up to 10485760 bytes and MP3 up to 52428800
+        bytes by default; the deployment can configure these limits. At most one
+        active MP3 per song. A retry with the same id and bytes returns the original
+        result even after the first upload raised the song revision.
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - name: X-Attachment-Id
+          in: header
+          required: true
+          description: Stable UUID for safe retries
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201': { description: Published after object and metadata commit, content: { application/json: { schema: { $ref: '#/components/schemas/Attachment' } } } }
+        '200': { description: Identical upload replayed, content: { application/json: { schema: { $ref: '#/components/schemas/Attachment' } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+        '415': { $ref: '#/components/responses/Error' }
+        '428': { $ref: '#/components/responses/Error' }
+  /v1/attachments/{id}:
+    parameters:
+      - $ref: '#/components/parameters/AttachmentId'
+    delete:
+      summary: Delete an active attachment
+      responses:
+        '200': { description: Deleted, content: { application/json: { schema: { $ref: '#/components/schemas/Deletion' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/attachments/{id}/content:
+    parameters:
+      - $ref: '#/components/parameters/AttachmentId'
+    get:
+      summary: Stream original private attachment through the API
+      responses:
+        '200':
+          description: Original file
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+            audio/mpeg: { schema: { type: string, format: binary } }
+        '404': { $ref: '#/components/responses/Error' }
+components:
+  parameters:
+    SongId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AttachmentId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Current song revision, for example "3". Conflicts return currentRevision.
+      schema: { type: string, pattern: '^"?[1-9][0-9]*"?$' }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 200 }
+  responses:
+    Error:
+      description: Error with stable code and request id
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    SongInput:
+      type: object
+      additionalProperties: false
+      required: [title, artist]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        artist: { type: string, minLength: 1, maxLength: 200 }
+        notes: { type: string, maxLength: 10000, default: '' }
+    SongPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        artist: { type: string, minLength: 1, maxLength: 200 }
+        notes: { type: string, maxLength: 10000 }
+    Song:
+      type: object
+      required: [id, title, artist, notes, revision, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        artist: { type: string }
+        notes: { type: string }
+        revision: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Attachment:
+      type: object
+      required: [id, songId, kind, mimeType, filename, byteSize, checksum, createdAt, contentUrl]
+      properties:
+        id: { type: string, format: uuid }
+        songId: { type: string, format: uuid }
+        kind: { type: string, enum: [image, audio] }
+        mimeType: { type: string, enum: [image/png, image/jpeg, image/webp, audio/mpeg] }
+        filename: { type: string }
+        byteSize: { type: integer, minimum: 1 }
+        checksum: { type: string, pattern: '^[0-9a-f]{64}$' }
+        createdAt: { type: string, format: date-time }
+        contentUrl: { type: string }
+    SnapshotSong:
+      allOf:
+        - $ref: '#/components/schemas/Song'
+        - type: object
+          required: [attachments]
+          properties:
+            attachments: { type: array, items: { $ref: '#/components/schemas/Attachment' } }
+    Snapshot:
+      type: object
+      required: [libraryId, libraryRevision, songs]
+      properties:
+        libraryId: { type: string, format: uuid }
+        libraryRevision: { type: integer, minimum: 0 }
+        songs: { type: array, items: { $ref: '#/components/schemas/SnapshotSong' } }
+    Deletion:
+      type: object
+      required: [id, deleted]
+      properties:
+        id: { type: string, format: uuid }
+        deleted: { type: boolean, const: true }
+    Error:
+      type: object
+      required: [code, message, requestId]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        requestId: { type: string }
+        currentRevision: { type: integer, minimum: 1 }

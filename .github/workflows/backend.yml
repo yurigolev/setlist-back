@@ -1,0 +1,114 @@
+name: Backend
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run db:check
+      - run: npm run build
+      - name: Prepare local service secrets
+        run: |
+          postgres_password=$(openssl rand -hex 24)
+          minio_password=$(openssl rand -hex 24)
+          cat > .env <<EOF
+          POSTGRES_USER=setlist
+          POSTGRES_PASSWORD=$postgres_password
+          POSTGRES_DB=setlist
+          MINIO_ROOT_USER=setlist
+          MINIO_ROOT_PASSWORD=$minio_password
+          PWA_ORIGIN=http://localhost:5173
+          API_PORT=0
+          PORT=3000
+          MINIO_BUCKET=setlist-files
+          MAX_IMAGE_BYTES=10485760
+          MAX_MP3_BYTES=52428800
+          EOF
+      - name: Build and start containers
+        run: docker compose up -d --build --wait
+      - name: Integration tests against clean services
+        run: docker compose exec -T api npm test
+      - name: Service logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=100
+      - name: Clean up
+        if: always()
+        run: docker compose down -v
+  publish:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ghcr.io/yurigolev/setlist-back:${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/yurigolev/setlist-back
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    concurrency:
+      group: production-backend
+      cancel-in-progress: false
+    steps:
+      - name: Deploy tested main commit over verified SSH
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.sha }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Queue ordering is not guaranteed: never deploy an older main commit.
+          latest=$(gh api repos/yurigolev/setlist-back/git/ref/heads/main --jq '.object.sha')
+          if [[ "$latest" != "$RELEASE_SHA" ]]; then
+            echo 'A newer main commit exists; deployment skipped.'
+            exit 0
+          fi
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-zA-Z0-9_-]+$ ]]
+          DEPLOY_PORT=${DEPLOY_PORT:-22}
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          trap 'rm -f ~/.ssh/deploy_key' EXIT
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 "$DEPLOY_USER@$DEPLOY_HOST" \
+            "sudo /usr/local/sbin/setlist-deploy backend $RELEASE_SHA"

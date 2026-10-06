@@ -1,0 +1,10 @@
+[Unit]
+Description=Setlist consistent database and attachment backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/setlist-backup
+TimeoutStartSec=900
+UMask=0077
