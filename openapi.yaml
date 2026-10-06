@@ -12,14 +12,18 @@ paths:
     get:
       summary: Service health
       responses:
-        200:
-          description: New response
+        '200':
+          description: Database and object storage are ready
           content:
             application/json:
               schema:
-                : 
-        '200':
-          description: Process is ready
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+        '503': { $ref: '#/components/responses/Error' }
   /v1/songs:
     post:
       summary: Create a song
