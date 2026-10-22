@@ -23,6 +23,7 @@ trap restart_api EXIT
 [[ -s $out/postgres.dump && -s $out/objects/manifest.json ]]
 cp /opt/setlist/.env.production "$out/env.production"
 cp /opt/setlist/docker-compose.prod.yml "$out/docker-compose.prod.yml"
+cp /opt/setlist/Caddyfile "$out/Caddyfile"
 touch "$out/COMPLETE"
 # Retain the newest seven complete backup sets; incomplete backups stay for diagnosis.
 mapfile -t old < <(find /opt/setlist/backups -mindepth 2 -maxdepth 2 -name COMPLETE -printf '%h\n' | sort -r | tail -n +8)

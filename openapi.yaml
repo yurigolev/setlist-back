@@ -1,10 +1,12 @@
 openapi: 3.1.0
 info:
-  title: Setlist personal library API
+  title: Collaborative setlists API
   version: 1.0.0
-  description: >-
-    Public single-library prototype. Anyone who knows the API address can read and
-    change the library. CORS only limits browser origins; it is not authentication.
+  description: Verified Telegram sessions; one song belongs to exactly one
+    setlist. Database membership controls all private routes. Owner manages
+    setlists, memberships and invitations; owner/editor can create, update and
+    delete content; viewer can read/download. Legacy aliases refer only to the
+    initial legacy setlist and use its current membership.
 servers:
   - url: /
 paths:
@@ -18,81 +20,175 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [status]
+                required:
+                  - status
                 properties:
                   status:
                     type: string
                     const: ok
-        '503': { $ref: '#/components/responses/Error' }
+        '503':
+          $ref: '#/components/responses/Error'
   /v1/songs:
     post:
       summary: Create a song
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Token from GET /v1/auth/session. Exact PWA Origin is also required.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/SongInput' }
+            schema:
+              $ref: '#/components/schemas/SongInput'
       responses:
-        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Song' } } } }
-        '200': { description: Same idempotency key and input replayed, content: { application/json: { schema: { $ref: '#/components/schemas/Song' } } } }
-        '400': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
+        '200':
+          description: Same idempotency key and input replayed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Song'
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Song'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+      security:
+        - SessionCookie: []
+      deprecated: true
   /v1/songs/{id}:
     parameters:
       - $ref: '#/components/parameters/SongId'
     patch:
       summary: Update text fields only
-      description: Attachments are rejected and can only be changed through attachment operations.
+      description: Attachments are rejected and can only be changed through attachment
+        operations.
       parameters:
         - $ref: '#/components/parameters/IfMatch'
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Token from GET /v1/auth/session. Exact PWA Origin is also required.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/SongPatch' }
+            schema:
+              $ref: '#/components/schemas/SongPatch'
       responses:
-        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/Song' } } } }
-        '400': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
-        '428': { $ref: '#/components/responses/Error' }
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Song'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '428':
+          $ref: '#/components/responses/Error'
+      security:
+        - SessionCookie: []
+      deprecated: true
     delete:
       summary: Delete a song and its active attachments
       parameters:
         - $ref: '#/components/parameters/IfMatch'
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Token from GET /v1/auth/session. Exact PWA Origin is also required.
       responses:
-        '200': { description: Deleted, content: { application/json: { schema: { $ref: '#/components/schemas/Deletion' } } } }
-        '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
-        '428': { $ref: '#/components/responses/Error' }
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deletion'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '428':
+          $ref: '#/components/responses/Error'
+      security:
+        - SessionCookie: []
+      deprecated: true
   /v1/library/snapshot:
     get:
       summary: Full consistent library snapshot
-      description: Song and attachment metadata are read in one repeatable-read transaction.
+      description: Song and attachment metadata are read under the scope lock in one read-committed transaction.
       responses:
-        '200': { description: Complete snapshot at one library revision, content: { application/json: { schema: { $ref: '#/components/schemas/Snapshot' } } } }
+        '200':
+          description: Complete snapshot at one library revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Snapshot'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+      security:
+        - SessionCookie: []
   /v1/songs/{songId}/attachments:
     parameters:
       - name: songId
         in: path
         required: true
-        schema: { type: string, format: uuid }
+        schema:
+          type: string
+          format: uuid
     post:
       summary: Upload PNG, JPEG, WebP or MP3
-      description: >-
-        One file per request. Images up to 10485760 bytes and MP3 up to 52428800
-        bytes by default; the deployment can configure these limits. At most one
-        active MP3 per song. A retry with the same id and bytes returns the original
-        result even after the first upload raised the song revision.
+      description: One file per request. Images up to 10485760 bytes and MP3 up to
+        52428800 bytes by default; the deployment can configure these limits. At
+        most one active MP3 per song. A retry with the same id and bytes returns
+        the original result even after the first upload raised the song
+        revision.
       parameters:
         - $ref: '#/components/parameters/IfMatch'
         - name: X-Attachment-Id
           in: header
           required: true
           description: Stable UUID for safe retries
-          schema: { type: string, format: uuid }
+          schema:
+            type: string
+            format: uuid
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Token from GET /v1/auth/session. Exact PWA Origin is also required.
       requestBody:
         required: true
         content:
@@ -100,26 +196,72 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [file]
+              required:
+                - file
               properties:
-                file: { type: string, format: binary }
+                file:
+                  type: string
+                  format: binary
       responses:
-        '201': { description: Published after object and metadata commit, content: { application/json: { schema: { $ref: '#/components/schemas/Attachment' } } } }
-        '200': { description: Identical upload replayed, content: { application/json: { schema: { $ref: '#/components/schemas/Attachment' } } } }
-        '400': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
-        '413': { $ref: '#/components/responses/Error' }
-        '415': { $ref: '#/components/responses/Error' }
-        '428': { $ref: '#/components/responses/Error' }
+        '200':
+          description: Identical upload replayed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attachment'
+        '201':
+          description: Published after object and metadata commit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attachment'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '413':
+          $ref: '#/components/responses/Error'
+        '415':
+          $ref: '#/components/responses/Error'
+        '428':
+          $ref: '#/components/responses/Error'
+      security:
+        - SessionCookie: []
+      deprecated: true
   /v1/attachments/{id}:
     parameters:
       - $ref: '#/components/parameters/AttachmentId'
     delete:
       summary: Delete an active attachment
       responses:
-        '200': { description: Deleted, content: { application/json: { schema: { $ref: '#/components/schemas/Deletion' } } } }
-        '404': { $ref: '#/components/responses/Error' }
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deletion'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Token from GET /v1/auth/session. Exact PWA Origin is also required.
+      deprecated: true
   /v1/attachments/{id}/content:
     parameters:
       - $ref: '#/components/parameters/AttachmentId'
@@ -129,106 +271,1231 @@ paths:
         '200':
           description: Original file
           content:
-            image/png: { schema: { type: string, format: binary } }
-            image/jpeg: { schema: { type: string, format: binary } }
-            image/webp: { schema: { type: string, format: binary } }
-            audio/mpeg: { schema: { type: string, format: binary } }
-        '404': { $ref: '#/components/responses/Error' }
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+      security:
+        - SessionCookie: []
+      deprecated: true
+  /v1/auth/telegram/start:
+    get:
+      summary: Start browser-bound Telegram OIDC login
+      parameters:
+        - name: returnTo
+          in: query
+          schema:
+            type: string
+            default: /
+          description: Internal application path only.
+      responses:
+        '302':
+          description: Redirect to Telegram, or fixed application login page if unavailable.
+        '400': &a1
+          $ref: '#/components/responses/Error'
+        '429': *a1
+  /v1/auth/telegram/callback:
+    get:
+      summary: Consume one-use login attempt and establish session
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to internal application path on success; fixed
+            /login?authError=invalid|unavailable on failure.
+  /v1/auth/session:
+    get:
+      summary: Current verified profile and CSRF token
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Current session; Cache-Control no-store.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '401': &a2
+          $ref: '#/components/responses/Error'
+        '503': *a2
+  /v1/auth/refresh-context:
+    get:
+      summary: Current refresh profile and CSRF for cold-start recovery; no renewal
+      security:
+        - RefreshCookie: []
+      responses:
+        '200':
+          description: Refresh context; Cache-Control no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '401':
+          $ref: '#/components/responses/Error'
+  /v1/auth/refresh:
+    post:
+      summary: Rotate refresh and issue 15-minute access; renew refresh for 90 days
+      security:
+        - RefreshCookie: []
+        - SessionCookie: []
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: CSRF from session or refresh-context; exact PWA Origin required. SessionCookie permits bootstrap of an unexpired legacy session only.
+      responses:
+        '200':
+          description: New HttpOnly cookies; Cache-Control no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: REFRESH_CONFLICT within 10 seconds of rotation; recheck access cookie, no new token issued
+  /v1/auth/logout:
+    post:
+      summary: Revoke current access/refresh family and clear cookies
+      security:
+        - SessionCookie: []
+        - RefreshCookie: []
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: CSRF from GET /v1/auth/session or /v1/auth/refresh-context. Exact PWA Origin is required.
+      responses:
+        '204':
+          description: Session revoked.
+        '401': &a3
+          $ref: '#/components/responses/Error'
+        '403': *a3
+        '503': *a3
+  /v1/setlists/{setlistId}/songs:
+    post:
+      summary: Create a song
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Token from GET /v1/auth/session. Exact PWA Origin is also required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SongInput'
+      responses:
+        '200':
+          description: Same idempotency key and input replayed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Song'
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Song'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+      security:
+        - SessionCookie: []
+    parameters:
+      - name: setlistId
+        in: path
+        required: true
+        schema: &a5
+          type: string
+          format: uuid
+    get:
+      summary: List scoped songs
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - songs
+                properties:
+                  songs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Song'
+        '400': &a4
+          $ref: '#/components/responses/Error'
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+  /v1/setlists/{setlistId}/songs/{id}:
+    parameters:
+      - name: setlistId
+        in: path
+        required: true
+        schema: *a5
+      - $ref: '#/components/parameters/SongId'
+    patch:
+      summary: Update text fields only
+      description: Attachments are rejected and can only be changed through attachment
+        operations.
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Token from GET /v1/auth/session. Exact PWA Origin is also required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SongPatch'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Song'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '428':
+          $ref: '#/components/responses/Error'
+      security:
+        - SessionCookie: []
+    delete:
+      summary: Delete a song and its active attachments
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Token from GET /v1/auth/session. Exact PWA Origin is also required.
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deletion'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '428':
+          $ref: '#/components/responses/Error'
+      security:
+        - SessionCookie: []
+    get:
+      summary: Read scoped song
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Song'
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+  /v1/setlists/{setlistId}/songs/{songId}/attachments:
+    parameters:
+      - name: setlistId
+        in: path
+        required: true
+        schema: *a5
+      - name: songId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      summary: Upload PNG, JPEG, WebP or MP3
+      description: One file per request. Images up to 10485760 bytes and MP3 up to
+        52428800 bytes by default; the deployment can configure these limits. At
+        most one active MP3 per song. A retry with the same id and bytes returns
+        the original result even after the first upload raised the song
+        revision.
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - name: X-Attachment-Id
+          in: header
+          required: true
+          description: Stable UUID for safe retries
+          schema:
+            type: string
+            format: uuid
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Token from GET /v1/auth/session. Exact PWA Origin is also required.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Identical upload replayed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attachment'
+        '201':
+          description: Published after object and metadata commit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attachment'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '413':
+          $ref: '#/components/responses/Error'
+        '415':
+          $ref: '#/components/responses/Error'
+        '428':
+          $ref: '#/components/responses/Error'
+      security:
+        - SessionCookie: []
+  /v1/setlists/{setlistId}/attachments/{id}:
+    parameters:
+      - name: setlistId
+        in: path
+        required: true
+        schema: *a5
+      - $ref: '#/components/parameters/AttachmentId'
+    delete:
+      summary: Delete an active attachment
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deletion'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - &a6
+          name: X-CSRF-Token
+          in: header
+          required: true
+          schema: &a7
+            type: string
+          description: Session CSRF token; exact configured Origin required.
+  /v1/setlists/{setlistId}/attachments/{id}/content:
+    parameters:
+      - name: setlistId
+        in: path
+        required: true
+        schema: *a5
+      - $ref: '#/components/parameters/AttachmentId'
+    get:
+      summary: Stream original private attachment through the API
+      responses:
+        '200':
+          description: Original file
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+      security:
+        - SessionCookie: []
+  /v1/setlists:
+    get:
+      summary: List current memberships
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - setlists
+                properties:
+                  setlists:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Setlist'
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+    post:
+      summary: Create setlist owned by current user
+      security:
+        - SessionCookie: []
+      parameters:
+        - *a6
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetlistInput'
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Setlist'
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+  /v1/setlists/{setlistId}:
+    parameters:
+      - name: setlistId
+        in: path
+        required: true
+        schema: *a5
+    patch:
+      summary: Owner renames setlist
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - *a6
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetlistInput'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Setlist'
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+    delete:
+      summary: Owner soft-deletes setlist; all content and invitation redemption denied
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - *a6
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deletion'
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+  /v1/setlists/{setlistId}/snapshot:
+    parameters:
+      - name: setlistId
+        in: path
+        required: true
+        schema: *a5
+    get:
+      summary: Consistent authorized scope snapshot
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetlistSnapshot'
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+  /v1/setlists/{setlistId}/members:
+    parameters:
+      - name: setlistId
+        in: path
+        required: true
+        schema: *a5
+    get:
+      summary: Read setlist members
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - members
+                properties:
+                  members:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Member'
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+  /v1/setlists/{setlistId}/members/{userId}:
+    parameters:
+      - name: setlistId
+        in: path
+        required: true
+        schema: *a5
+      - name: userId
+        in: path
+        required: true
+        schema: *a5
+    patch:
+      summary: Owner changes role; last owner cannot be demoted
+      security:
+        - SessionCookie: []
+      parameters:
+        - *a6
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - role
+              properties:
+                role:
+                  enum:
+                    - owner
+                    - editor
+                    - viewer
+              additionalProperties: false
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - userId
+                  - role
+                properties:
+                  userId: *a5
+                  role:
+                    enum:
+                      - owner
+                      - editor
+                      - viewer
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+    delete:
+      summary: Owner removes member; last owner cannot be removed
+      security:
+        - SessionCookie: []
+      parameters:
+        - *a6
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - userId
+                  - deleted
+                properties:
+                  userId: *a5
+                  deleted:
+                    const: true
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+  /v1/setlists/{setlistId}/invitations:
+    parameters:
+      - name: setlistId
+        in: path
+        required: true
+        schema: *a5
+    get:
+      summary: Owner lists invitation metadata; tokens never returned
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - invitations
+                properties:
+                  invitations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Invitation'
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+    post:
+      summary: Owner creates one-time invitation
+      security:
+        - SessionCookie: []
+      parameters:
+        - *a6
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - role
+              properties:
+                role:
+                  enum:
+                    - editor
+                    - viewer
+                expiresInHours:
+                  description: Legacy optional field; invitations no longer expire.
+                  type: integer
+                  minimum: 1
+                  maximum: 168
+              additionalProperties: false
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - invitation
+                  - token
+                properties:
+                  invitation:
+                    $ref: '#/components/schemas/Invitation'
+                  token: *a7
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+  /v1/setlists/{setlistId}/invitations/{id}:
+    parameters:
+      - name: setlistId
+        in: path
+        required: true
+        schema: *a5
+      - name: id
+        in: path
+        required: true
+        schema: *a5
+    delete:
+      summary: Owner revokes invitation
+      security:
+        - SessionCookie: []
+      parameters:
+        - *a6
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - revoked
+                properties:
+                  id: *a5
+                  revoked:
+                    const: true
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+  /v1/invitations/accept:
+    post:
+      summary: Atomically consume one-time invitation; retain existing membership
+        authority
+      security:
+        - SessionCookie: []
+      parameters:
+        - *a6
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - token
+              properties:
+                token:
+                  type: string
+                  pattern: ^[A-Za-z0-9_-]{43}$
+              additionalProperties: false
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - setlist
+                properties:
+                  setlist:
+                    $ref: '#/components/schemas/Setlist'
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
+  /v1/setlists/{setlistId}/songs/{songId}/copy:
+    parameters:
+      - name: setlistId
+        in: path
+        required: true
+        schema: *a5
+      - name: songId
+        in: path
+        required: true
+        schema: *a5
+    post:
+      summary: 'Copy song and media independently: source read and target write
+        required'
+      security:
+        - SessionCookie: []
+      parameters:
+        - *a6
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - targetSetlistId
+              properties:
+                targetSetlistId: *a5
+              additionalProperties: false
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Song'
+        '400': *a4
+        '401': *a4
+        '403': *a4
+        '404': *a4
+        '409': *a4
+        '428': *a4
 components:
   parameters:
     SongId:
       name: id
       in: path
       required: true
-      schema: { type: string, format: uuid }
+      schema:
+        type: string
+        format: uuid
     AttachmentId:
       name: id
       in: path
       required: true
-      schema: { type: string, format: uuid }
+      schema:
+        type: string
+        format: uuid
     IfMatch:
       name: If-Match
       in: header
       required: true
-      description: Current song revision, for example "3". Conflicts return currentRevision.
-      schema: { type: string, pattern: '^"?[1-9][0-9]*"?$' }
+      description: Expected song or setlist revision. Missing/invalid format returns
+        428; conflicting revision returns 409 with currentRevision. Initial
+        setlist revision is 0.
+      schema:
+        type: string
+        pattern: ^"?[1-9][0-9]*"?$
     IdempotencyKey:
       name: Idempotency-Key
       in: header
       required: true
-      schema: { type: string, minLength: 1, maxLength: 200 }
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
   responses:
     Error:
       description: Error with stable code and request id
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/Error' }
+          schema:
+            $ref: '#/components/schemas/Error'
   schemas:
     SongInput:
       type: object
       additionalProperties: false
-      required: [title, artist]
+      required:
+        - title
+        - artist
       properties:
-        title: { type: string, minLength: 1, maxLength: 200 }
-        artist: { type: string, minLength: 1, maxLength: 200 }
-        notes: { type: string, maxLength: 10000, default: '' }
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        artist:
+          type: string
+          minLength: 1
+          maxLength: 200
+        notes:
+          type: string
+          maxLength: 10000
+          default: ''
     SongPatch:
       type: object
       additionalProperties: false
       minProperties: 1
       properties:
-        title: { type: string, minLength: 1, maxLength: 200 }
-        artist: { type: string, minLength: 1, maxLength: 200 }
-        notes: { type: string, maxLength: 10000 }
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        artist:
+          type: string
+          minLength: 1
+          maxLength: 200
+        notes:
+          type: string
+          maxLength: 10000
     Song:
       type: object
-      required: [id, title, artist, notes, revision, createdAt, updatedAt]
+      required:
+        - id
+        - title
+        - artist
+        - notes
+        - revision
+        - createdAt
+        - updatedAt
+        - setlistId
       properties:
-        id: { type: string, format: uuid }
-        title: { type: string }
-        artist: { type: string }
-        notes: { type: string }
-        revision: { type: integer, minimum: 1 }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        artist:
+          type: string
+        notes:
+          type: string
+        revision:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        setlistId: *a5
     Attachment:
       type: object
-      required: [id, songId, kind, mimeType, filename, byteSize, checksum, createdAt, contentUrl]
+      required:
+        - id
+        - songId
+        - kind
+        - mimeType
+        - filename
+        - byteSize
+        - checksum
+        - createdAt
+        - contentUrl
+        - setlistId
       properties:
-        id: { type: string, format: uuid }
-        songId: { type: string, format: uuid }
-        kind: { type: string, enum: [image, audio] }
-        mimeType: { type: string, enum: [image/png, image/jpeg, image/webp, audio/mpeg] }
-        filename: { type: string }
-        byteSize: { type: integer, minimum: 1 }
-        checksum: { type: string, pattern: '^[0-9a-f]{64}$' }
-        createdAt: { type: string, format: date-time }
-        contentUrl: { type: string }
+        id:
+          type: string
+          format: uuid
+        songId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+            - image
+            - audio
+        mimeType:
+          type: string
+          enum:
+            - image/png
+            - image/jpeg
+            - image/webp
+            - audio/mpeg
+        filename:
+          type: string
+        byteSize:
+          type: integer
+          minimum: 1
+        checksum:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        createdAt:
+          type: string
+          format: date-time
+        contentUrl:
+          type: string
+        setlistId: *a5
     SnapshotSong:
       allOf:
         - $ref: '#/components/schemas/Song'
         - type: object
-          required: [attachments]
+          required:
+            - attachments
           properties:
-            attachments: { type: array, items: { $ref: '#/components/schemas/Attachment' } }
+            attachments:
+              type: array
+              items:
+                $ref: '#/components/schemas/Attachment'
     Snapshot:
       type: object
-      required: [libraryId, libraryRevision, songs]
+      required:
+        - libraryId
+        - libraryRevision
+        - songs
       properties:
-        libraryId: { type: string, format: uuid }
-        libraryRevision: { type: integer, minimum: 0 }
-        songs: { type: array, items: { $ref: '#/components/schemas/SnapshotSong' } }
+        libraryId:
+          type: string
+          format: uuid
+        libraryRevision:
+          type: integer
+          minimum: 0
+        songs:
+          type: array
+          items:
+            $ref: '#/components/schemas/SnapshotSong'
     Deletion:
       type: object
-      required: [id, deleted]
+      required:
+        - id
+        - deleted
       properties:
-        id: { type: string, format: uuid }
-        deleted: { type: boolean, const: true }
+        id:
+          type: string
+          format: uuid
+        deleted:
+          type: boolean
+          const: true
     Error:
       type: object
-      required: [code, message, requestId]
+      required:
+        - code
+        - message
+        - requestId
       properties:
-        code: { type: string }
-        message: { type: string }
-        requestId: { type: string }
-        currentRevision: { type: integer, minimum: 1 }
+        code:
+          type: string
+        message:
+          type: string
+        requestId:
+          type: string
+        currentRevision:
+          type: integer
+          minimum: 1
+    AuthUser:
+      type: object
+      required:
+        - id
+        - displayName
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        username:
+          type: string
+        picture:
+          type: string
+          format: uri
+    AuthSession:
+      type: object
+      required:
+        - user
+        - csrfToken
+        - refreshEnabled
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        csrfToken:
+          type: string
+        refreshEnabled:
+          type: boolean
+          description: False only for a valid legacy session needing protected bootstrap
+    Setlist:
+      type: object
+      required:
+        - id
+        - title
+        - revision
+        - createdAt
+        - updatedAt
+        - deletedAt
+        - role
+      properties:
+        id: *a5
+        title: *a7
+        revision:
+          type: integer
+          minimum: 0
+        createdAt: &a8
+          type: string
+          format: date-time
+        updatedAt: *a8
+        deletedAt: &a9
+          type:
+            - string
+            - 'null'
+          format: date-time
+        role:
+          enum:
+            - owner
+            - editor
+            - viewer
+    SetlistInput:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+      additionalProperties: false
+    Invitation:
+      type: object
+      required:
+        - id
+        - role
+        - expiresAt
+        - createdAt
+        - revokedAt
+        - usedAt
+      properties:
+        id: *a5
+        role:
+          enum:
+            - editor
+            - viewer
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        createdAt: *a8
+        revokedAt: *a9
+        usedAt: *a9
+    Member:
+      type: object
+      required:
+        - user
+        - role
+        - createdAt
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        role:
+          enum:
+            - owner
+            - editor
+            - viewer
+        createdAt: *a8
+    User:
+      type: object
+      required:
+        - id
+        - displayName
+      properties:
+        id: *a5
+        displayName: *a7
+    SetlistSnapshot:
+      type: object
+      required:
+        - setlistId
+        - setlistRevision
+        - role
+        - songs
+      properties:
+        setlistId: *a5
+        setlistRevision:
+          type: integer
+          minimum: 0
+        role:
+          enum:
+            - owner
+            - editor
+            - viewer
+        songs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Song'
+  securitySchemes:
+    RefreshCookie:
+      type: apiKey
+      in: cookie
+      name: setlist_refresh
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: setlist_session

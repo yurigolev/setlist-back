@@ -22,6 +22,41 @@
       "when": 1790328590584,
       "tag": "0002_massive_blockbuster",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791388952866,
+      "tag": "0003_telegram_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791789299007,
+      "tag": "0004_bouncy_vertigo",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791789483846,
+      "tag": "0005_smart_wrecker",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791793271771,
+      "tag": "0006_indefinite_invites",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791816146116,
+      "tag": "0007_refresh_sessions",
+      "breakpoints": true
     }
   ]
 }

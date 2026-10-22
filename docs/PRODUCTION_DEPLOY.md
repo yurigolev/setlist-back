@@ -6,9 +6,11 @@ is the complete Git commit SHA.
 
 Backend deployment files live in `/opt/setlist`:
 
-- `docker-compose.prod.yml`, owned by root; frontend alone publishes HTTP port 80.
+- `docker-compose.prod.yml` and `Caddyfile`, owned by root. Caddy publishes ports
+  80/443; frontend publishes only `127.0.0.1:8080` for local diagnostics.
 - `.env.production`, owned by root, mode 600; generate separate database and MinIO
   passwords with `openssl rand -hex 32` and configure both initial image tags.
+  Set `APP_DOMAIN=setlivo.ru` and `PWA_ORIGIN=https://setlivo.ru`.
 - `/usr/local/sbin/setlist-deploy`, installed from `scripts/deploy.sh`, owned by
   root and executable. The deploy user may run only this script through sudo and
   cannot modify the Compose file or environment file.
@@ -50,16 +52,24 @@ runs database migrations; image rollback does not reverse migrations. Release
 migrations must remain compatible with the previous backend, or rollback needs a
 verified database-and-object backup and a separate restoration procedure.
 
-At the current HTTP stage the browser can use the application, but service workers
-and installed PWA offline mode require HTTPS on a public origin. `/health` proxies
-the actual API health; it does not just report the nginx process. Domain, HTTPS,
-and access protection are subsequent setup steps.
+Production uses `https://setlivo.ru`. Point the domain A record at the VPS and open
+TCP 80/443. Caddy obtains and renews the public certificate and redirects HTTP to
+HTTPS. Preserve the `caddy_data` and `caddy_config` volumes. `/health` proxies the
+actual API health; deploy checks this route through HTTPS with certificate
+validation. HTTPS enables the PWA service worker; application access protection
+is a separate feature.
 
 Install `scripts/production-backup.sh` as root-owned `/usr/local/sbin/setlist-backup`
 and copy `deploy/setlist-backup.{service,timer}` to `/etc/systemd/system`, then run
 `systemctl daemon-reload && systemctl enable --now setlist-backup.timer`.
 The timer runs daily around 04:30 UTC. Backups briefly stop API writes and include
 PostgreSQL, attachment contents/manifests, Compose configuration, and production
-environment. Keep the backup directory private: it contains secrets. The newest
+environment and Caddyfile. Keep the backup directory private: it contains secrets. The newest
 seven complete backup sets remain on the VPS. Copy them off-server separately.
 Every backend deployment also takes a consistent backup before running migrations.
+
+## Persistent authorization rollout
+
+For the first Telegram/setlist rollout, follow [SAFE_RELEASE.md](SAFE_RELEASE.md): production Telegram credentials, a rehearsal from one complete backup, and explicit plan/apply adoption of the legacy library are required. Install the updated Compose and deploy script separately before releasing images; the existing image deployment does not copy those files. Healthchecks alone do not confirm owner access.
+
+Migration `0007_refresh_sessions.sql` adds refresh families and hash history, with nullable family links for existing access sessions. Deploy the migrated backend before the matching client. Set `AUTH_SESSION_TTL_SECONDS=900` and `AUTH_REFRESH_TTL_SECONDS=7776000`; existing environment values override defaults. Access lasts 15 minutes, refresh renews for 90 days after successful rotation. Existing legacy cookie expiries remain unchanged and can bootstrap a family while valid. A rollback can retain the additive tables, but the previous backend cannot renew refresh sessions.

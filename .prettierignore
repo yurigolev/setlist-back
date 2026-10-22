@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+backups/
+drizzle/meta/
+package-lock.json
+.serena/
+.agents/
+.husky/_/
+.env*

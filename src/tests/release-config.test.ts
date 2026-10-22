@@ -1,0 +1,89 @@
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import test from 'node:test';
+
+const exec = promisify(execFile);
+const env = {
+  ...process.env,
+  FRONTEND_IMAGE: 'example.invalid/frontend:test',
+  BACKEND_IMAGE: 'example.invalid/backend:test',
+  APP_DOMAIN: 'release.example.invalid',
+  PWA_ORIGIN: 'https://release.example.invalid',
+  POSTGRES_USER: 'qa',
+  POSTGRES_PASSWORD: 'qa-not-a-real-password',
+  POSTGRES_DB: 'qa',
+  MINIO_ROOT_USER: 'qa',
+  MINIO_ROOT_PASSWORD: 'qa-not-a-real-password',
+  TELEGRAM_CLIENT_ID: 'qa-client',
+  TELEGRAM_CLIENT_SECRET: 'qa-not-a-real-secret',
+  TELEGRAM_REDIRECT_URI: 'https://release.example.invalid/v1/auth/telegram/callback',
+};
+const args = [
+  'compose',
+  '--env-file',
+  '/dev/null',
+  '-f',
+  'docker-compose.prod.yml',
+  'config',
+  '--format',
+  'json',
+];
+
+test('production Compose passes Telegram configuration, uses secure cookies and retains storage volumes', async () => {
+  const { stdout } = await exec('docker', args, { env });
+  const compose = JSON.parse(stdout);
+  const api = compose.services.api.environment;
+  for (const name of [
+    'TELEGRAM_CLIENT_ID',
+    'TELEGRAM_CLIENT_SECRET',
+    'TELEGRAM_REDIRECT_URI',
+  ] as const)
+    assert.equal(api[name], env[name]);
+  assert.equal(api.AUTH_ALLOW_INSECURE_LOCAL_HTTP, 'false');
+  assert.equal(api.NODE_ENV, 'production');
+  assert.equal(compose.services.postgres.volumes[0].source, 'pgdata');
+  assert.equal(compose.services.minio.volumes[0].source, 'miniadata');
+  for (const name of [
+    'TELEGRAM_CLIENT_ID',
+    'TELEGRAM_CLIENT_SECRET',
+    'TELEGRAM_REDIRECT_URI',
+  ] as const) {
+    await assert.rejects(exec('docker', args, { env: { ...env, [name]: '' } }), (error) => {
+      assert.match((error as { stderr: string }).stderr, new RegExp(name));
+      return true;
+    });
+  }
+});
+
+test('production runtime rejects missing credentials and a callback on another origin or path before opening a database', async () => {
+  const runtime = {
+    ...env,
+    NODE_ENV: 'production',
+    DOTENV_PATH: '/dev/null',
+    DOTENV_QUIET: 'true',
+    DATABASE_URL: 'postgres://qa:qa@127.0.0.1:59999/qa',
+    MINIO_ENDPOINT: '127.0.0.1',
+    MINIO_ACCESS_KEY: 'qa',
+    MINIO_SECRET_KEY: 'qa-not-a-real-password',
+    AUTH_ALLOW_INSECURE_LOCAL_HTTP: 'false',
+  };
+  const command = ['--input-type=module', '-e', 'await import("./dist/config.js")'];
+  await exec(process.execPath, command, { env: runtime });
+  for (const override of [
+    { TELEGRAM_CLIENT_SECRET: '' },
+    { TELEGRAM_REDIRECT_URI: 'https://other.example.invalid/v1/auth/telegram/callback' },
+    { TELEGRAM_REDIRECT_URI: 'https://release.example.invalid/wrong-callback' },
+  ]) {
+    await assert.rejects(
+      exec(process.execPath, command, { env: { ...runtime, ...override } }),
+      (error) => {
+        assert.match(
+          (error as { stderr: string }).stderr,
+          /Production requires Telegram credentials/,
+        );
+        return true;
+      },
+    );
+  }
+});

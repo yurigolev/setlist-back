@@ -5,12 +5,28 @@ x-logging: &logging
     max-size: '10m'
     max-file: '3'
 services:
+  caddy:
+    image: caddy@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      frontend:
+        condition: service_healthy
   frontend:
     image: ${FRONTEND_IMAGE:?}
     environment:
       BACKEND_URL: http://api:3000
     ports:
-      - '${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-80}:80'
+      - '127.0.0.1:8080:80'
     restart: unless-stopped
     logging: *logging
     depends_on:
@@ -27,8 +43,15 @@ services:
     logging: *logging
     environment:
       PORT: 3000
+      NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
       PWA_ORIGIN: ${PWA_ORIGIN:?}
+      TELEGRAM_CLIENT_ID: ${TELEGRAM_CLIENT_ID:?Set the production Telegram client ID}
+      TELEGRAM_CLIENT_SECRET: ${TELEGRAM_CLIENT_SECRET:?Set the production Telegram client secret}
+      TELEGRAM_REDIRECT_URI: ${TELEGRAM_REDIRECT_URI:?Set the registered production callback URL}
+      AUTH_ALLOW_INSECURE_LOCAL_HTTP: 'false'
+      AUTH_SESSION_TTL_SECONDS: ${AUTH_SESSION_TTL_SECONDS:-900}
+      AUTH_REFRESH_TTL_SECONDS: ${AUTH_REFRESH_TTL_SECONDS:-7776000}
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
       MINIO_USE_SSL: 'false'
@@ -43,7 +66,13 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'node', '-e', "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -86,5 +115,7 @@ services:
       interval: 5s
       retries: 10
 volumes:
+  caddy_data:
+  caddy_config:
   pgdata:
   miniadata:
