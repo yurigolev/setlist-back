@@ -43,9 +43,17 @@ test('production Compose passes Telegram configuration, uses secure cookies and 
     assert.equal(api[name], env[name]);
   assert.equal(api.AUTH_ALLOW_INSECURE_LOCAL_HTTP, 'false');
   assert.equal(api.NODE_ENV, 'production');
+  assert.equal(api.NODE_USE_ENV_PROXY, '1');
+  assert.equal(api.HTTPS_PROXY, '');
+  assert.equal(api.NO_PROXY, 'localhost,127.0.0.1,::1,postgres,minio,api,frontend,caddy');
   assert.equal(api.TRUSTED_PROXY_CHAIN, 'frontend,caddy');
   assert.equal(compose.services.postgres.volumes[0].source, 'pgdata');
   assert.equal(compose.services.minio.volumes[0].source, 'miniadata');
+  const proxyUrl = 'https://qa:synthetic@proxy.example.invalid:8443';
+  const proxied = JSON.parse(
+    (await exec('docker', args, { env: { ...env, TELEGRAM_HTTPS_PROXY_URL: proxyUrl } })).stdout,
+  );
+  assert.equal(proxied.services.api.environment.HTTPS_PROXY, proxyUrl);
   for (const name of [
     'TELEGRAM_CLIENT_ID',
     'TELEGRAM_CLIENT_SECRET',

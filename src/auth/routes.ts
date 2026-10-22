@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import { ApiError } from '../errors.js';
+import { TelegramOidcError } from './oidc.js';
 import type { AuthConfig, AuthSession, AuthStore, TelegramOidc } from './types.js';
 
 export const SESSION_COOKIE = 'setlist_session';
@@ -135,7 +136,23 @@ export async function registerAuthRoutes(
         let identity;
         try {
           identity = await oidc.authenticate(query.code, attempt.verifier, attempt.nonce);
-        } catch {
+        } catch (error) {
+          const failure = error instanceof TelegramOidcError ? error : undefined;
+          request.log.warn(
+            {
+              telegramAuth: failure?.diagnostic ?? {
+                stage: 'authentication',
+                reason: 'unexpected',
+              },
+            },
+            'Telegram authentication failed',
+          );
+          if (!failure || failure.category === 'unavailable')
+            throw new ApiError(
+              503,
+              'TELEGRAM_AUTH_UNAVAILABLE',
+              'Telegram authentication unavailable',
+            );
           throw new ApiError(401, 'TELEGRAM_AUTH_INVALID', 'Telegram authentication failed');
         }
         const token = randomToken(),

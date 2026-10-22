@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { Writable } from 'node:stream';
 import Fastify from 'fastify';
 import { registerErrors } from '../errors.js';
 import { registerAuthRoutes, tokenHash } from '../auth/routes.js';
 import { createProxyTrust } from '../proxy.js';
+import { TelegramOidcError } from '../auth/oidc.js';
 import type {
   AuthConfig,
   AuthSession,
@@ -129,9 +131,26 @@ function productionProxyTrust() {
     resolve: async (hostname) => proxyAddresses[hostname as keyof typeof proxyAddresses],
   });
 }
-async function fixture(enabled = true, proxies = createProxyTrust([])) {
+async function fixture(
+  enabled = true,
+  proxies = createProxyTrust([]),
+  failure?: { error: unknown; logs: string[] },
+) {
   const store = new MemoryStore();
-  const app = Fastify({ trustProxy: proxies.trustProxy });
+  const app = Fastify({
+    trustProxy: proxies.trustProxy,
+    logger: failure
+      ? {
+          level: 'warn',
+          stream: new Writable({
+            write(chunk, _encoding, callback) {
+              failure.logs.push(String(chunk));
+              callback();
+            },
+          }),
+        }
+      : false,
+  });
   registerErrors(app);
   proxies.register(app);
   app.get('/qa/client-ip', (request) => ({
@@ -150,6 +169,7 @@ async function fixture(enabled = true, proxies = createProxyTrust([])) {
       },
       async authenticate() {
         authenticated++;
+        if (failure) throw failure.error;
         return {
           issuer: 'https://oauth.telegram.org',
           subject: 'opaque-sub',
@@ -297,6 +317,52 @@ test('missing configuration redirects login to a generic unavailable screen', as
   assert.equal(response.headers.location, `${config.pwaOrigin}/login?authError=unavailable`);
   assert.match(String(response.headers['cache-control']), /no-store/);
   assert.equal(f.store.attempts.size, 0);
+});
+
+test('provider outages are unavailable, invalid tokens are invalid, and diagnostics omit secrets', async (t) => {
+  for (const [error, category, diagnostic] of [
+    [
+      new TelegramOidcError('unavailable', {
+        stage: 'token_exchange',
+        reason: 'network_timeout',
+        transportCode: 'ETIMEDOUT',
+      }),
+      'unavailable',
+      { stage: 'token_exchange', reason: 'network_timeout', transportCode: 'ETIMEDOUT' },
+    ],
+    [
+      new TelegramOidcError('invalid', {
+        stage: 'id_token',
+        reason: 'jwt_error',
+        joseCode: 'ERR_JWT_CLAIM_VALIDATION_FAILED',
+        claim: 'nonce',
+      }),
+      'invalid',
+      {
+        stage: 'id_token',
+        reason: 'jwt_error',
+        joseCode: 'ERR_JWT_CLAIM_VALIDATION_FAILED',
+        claim: 'nonce',
+      },
+    ],
+    [
+      new Error('provider JWT and client_secret must never enter logs'),
+      'unavailable',
+      { stage: 'authentication', reason: 'unexpected' },
+    ],
+  ] as const) {
+    const logs: string[] = [];
+    const f = await fixture(true, createProxyTrust([]), { error, logs });
+    t.after(() => f.app.close());
+    const grant = await f.start();
+    const denied = await f.callback(grant.state, grant.cookie);
+    assert.equal(denied.headers.location, `${config.pwaOrigin}/login?authError=${category}`);
+    assert.equal(f.store.sessions.size, 0);
+    assert.equal(f.store.attempts.size, 0);
+    assert.deepEqual(JSON.parse(logs.join('')).telegramAuth, diagnostic);
+    for (const sensitive of [grant.state, grant.cookie, 'qa-code', 'client_secret', 'provider JWT'])
+      assert.ok(!logs.join('').includes(sensitive));
+  }
 });
 
 test('refresh survives expired access, enforces CSRF/Origin, rotates once and detects replay', async (t) => {
