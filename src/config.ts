@@ -3,6 +3,13 @@ import 'dotenv/config';
 
 const schema = z.object({
   NODE_ENV: z.string().optional(),
+  TRUSTED_PROXY_CHAIN: z
+    .string()
+    .default('')
+    .transform((value) => (value ? value.split(',').map((host) => host.trim()) : []))
+    .pipe(
+      z.array(z.string().regex(/^(?=.{1,253}$)[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$/)).max(8),
+    ),
   TELEGRAM_CLIENT_ID: z.string().optional(),
   TELEGRAM_CLIENT_SECRET: z.string().optional(),
   TELEGRAM_REDIRECT_URI: z.string().url().optional(),
@@ -30,6 +37,8 @@ if (!parsed.success)
     `Invalid environment: ${parsed.error.issues.map((i) => i.path.join('.')).join(', ')}`,
   );
 const env = parsed.data;
+if (env.NODE_ENV === 'production' && !env.TRUSTED_PROXY_CHAIN.length)
+  throw new Error('Production requires an explicit TRUSTED_PROXY_CHAIN (nearest API first)');
 const localHttp = (url: URL) =>
   url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
 const pwaUrl = new URL(env.PWA_ORIGIN);
@@ -64,6 +73,7 @@ if (
 if (Boolean(env.LEGACY_OWNER_TELEGRAM_ISSUER) !== Boolean(env.LEGACY_OWNER_TELEGRAM_SUB))
   throw new Error('Legacy owner requires both explicit issuer and subject');
 export const config = {
+  trustedProxyChain: env.TRUSTED_PROXY_CHAIN,
   auth: {
     enabled: authEnabled,
     clientId: env.TELEGRAM_CLIENT_ID ?? '',

@@ -10,6 +10,7 @@ The backend uses Telegram's current OIDC Authorization Code Flow, not the archiv
 - `PWA_ORIGIN`: exact application origin, without path or trailing slash.
 - `AUTH_SESSION_TTL_SECONDS`: access lifetime; default 900 (15 minutes), range 60–2592000. Existing legacy sessions retain their original expiry.
 - `AUTH_REFRESH_TTL_SECONDS`: sliding refresh lifetime; default 7776000 (90 days), range 60–31536000. Successful rotation starts this lifetime again.
+- `TRUSTED_PROXY_CHAIN`: ordered Docker DNS proxy identities nearest API first (`frontend,caddy` in production, `pwa` in local Compose). Exact addresses and positions are verified before `request.ip` is used for login limits. Direct development leaves this empty and ignores forwarded headers. Production requires an explicit nonempty chain; details and spoofing checks are in `SAFE_RELEASE.md`.
 - `AUTH_ALLOW_INSECURE_LOCAL_HTTP`: default false. Explicit true permits non-Secure cookies only when both application and callback use HTTP localhost,127.0.0.1 or[::1]. HTTPS requires Secure cookies.
 - `LEGACY_OWNER_TELEGRAM_ISSUER` and `LEGACY_OWNER_TELEGRAM_SUB`: paired, explicit verified identity. Issuer must be `https://oauth.telegram.org`; subject is the token's opaque string `sub`, **not** numeric profile `id`, username or first login.
 

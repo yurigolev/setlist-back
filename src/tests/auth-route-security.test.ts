@@ -3,6 +3,7 @@ import test from 'node:test';
 import Fastify from 'fastify';
 import { registerErrors } from '../errors.js';
 import { registerAuthRoutes, tokenHash } from '../auth/routes.js';
+import { createProxyTrust } from '../proxy.js';
 import type {
   AuthConfig,
   AuthSession,
@@ -113,10 +114,32 @@ const config: AuthConfig = {
   secureCookies: false,
   sessionTtlSeconds: 3600,
 };
-async function fixture(enabled = true) {
+const proxyAddresses = {
+  frontend: [
+    { address: '172.18.0.5', family: 4 },
+    { address: 'fd00::5', family: 6 },
+  ],
+  caddy: [
+    { address: '172.18.0.6', family: 4 },
+    { address: 'fd00::6', family: 6 },
+  ],
+};
+function productionProxyTrust() {
+  return createProxyTrust(['frontend', 'caddy'], {
+    resolve: async (hostname) => proxyAddresses[hostname as keyof typeof proxyAddresses],
+  });
+}
+async function fixture(enabled = true, proxies = createProxyTrust([])) {
   const store = new MemoryStore();
-  const app = Fastify();
+  const app = Fastify({ trustProxy: proxies.trustProxy });
   registerErrors(app);
+  proxies.register(app);
+  app.get('/qa/client-ip', (request) => ({
+    ip: request.ip,
+    ips: request.ips,
+    host: request.host,
+    protocol: request.protocol,
+  }));
   let authenticated = 0;
   await registerAuthRoutes(app, {
     config: { ...config, enabled },
@@ -449,4 +472,137 @@ test('missing, malformed and expired refresh cannot renew or expose refresh cont
   }
   assert.equal(f.store.refreshes.size, 1);
   assert.equal(family.usedAt, undefined);
+});
+
+test('login limits are independent for clients behind the ordered production proxy chain', async (t) => {
+  const f = await fixture(true, productionProxyTrust());
+  t.after(() => f.app.close());
+  const client = (ip: string, prefix = '') =>
+    f.app.inject({
+      method: 'GET',
+      url: '/v1/auth/telegram/start',
+      remoteAddress: '172.18.0.5',
+      headers: { 'x-forwarded-for': `${prefix}${ip}, 172.18.0.6` },
+    });
+  for (let attempt = 0; attempt < 20; attempt++) {
+    assert.equal((await client('203.0.113.1')).statusCode, 302);
+    assert.equal((await client('203.0.113.2')).statusCode, 302);
+  }
+  assert.equal((await client('203.0.113.1')).statusCode, 429);
+  assert.equal((await client('203.0.113.2')).statusCode, 429);
+  assert.equal((await client('203.0.113.3')).statusCode, 302);
+  // Client-controlled prefixes, including trusted proxy addresses, cannot reset A's bucket.
+  assert.equal((await client('203.0.113.1', '198.51.100.99, 172.18.0.5, ')).statusCode, 429);
+});
+
+test('direct requests and an untrusted intermediate cannot spoof forwarded client metadata', async (t) => {
+  const f = await fixture(true, productionProxyTrust());
+  t.after(() => f.app.close());
+  for (let attempt = 0; attempt < 21; attempt++) {
+    const response = await f.app.inject({
+      method: 'GET',
+      url: '/v1/auth/telegram/start',
+      remoteAddress: '203.0.113.8',
+      headers: {
+        'x-forwarded-for': `198.51.100.${attempt}, 172.18.0.6`,
+        'x-real-ip': `192.0.2.${attempt}`,
+        forwarded: `for=192.0.2.${attempt}`,
+      },
+    });
+    assert.equal(response.statusCode, attempt < 20 ? 302 : 429);
+  }
+  const direct = await f.app.inject({
+    method: 'GET',
+    url: '/qa/client-ip',
+    remoteAddress: '203.0.113.8',
+    headers: {
+      host: 'setlivo.ru',
+      'x-forwarded-for': '192.0.2.9, 172.18.0.6',
+      'x-forwarded-host': 'attacker.invalid',
+      'x-forwarded-proto': 'https',
+      'x-real-ip': '192.0.2.9',
+      forwarded: 'for=192.0.2.9',
+    },
+  });
+  assert.deepEqual(direct.json(), {
+    ip: '203.0.113.8',
+    ips: ['203.0.113.8'],
+    host: 'setlivo.ru',
+    protocol: 'http',
+  });
+  const intermediate = await f.app.inject({
+    method: 'GET',
+    url: '/qa/client-ip',
+    remoteAddress: '172.18.0.5',
+    headers: { 'x-forwarded-for': '198.51.100.99, 172.18.0.77' },
+  });
+  assert.equal(intermediate.json().ip, '172.18.0.77');
+  // Merely being a trusted proxy at a different position is insufficient.
+  const wrongOrder = await f.app.inject({
+    method: 'GET',
+    url: '/qa/client-ip',
+    remoteAddress: '172.18.0.6',
+    headers: { 'x-forwarded-for': '198.51.100.99, 172.18.0.5' },
+  });
+  assert.equal(wrongOrder.json().ip, '172.18.0.6');
+});
+
+test('IPv6 and IPv4-mapped proxy addresses stop at the actual client even if it has a proxy IP', async (t) => {
+  const f = await fixture(true, productionProxyTrust());
+  t.after(() => f.app.close());
+  for (const [remoteAddress, chain, expected] of [
+    ['::ffff:172.18.0.5', '203.0.113.8, ::ffff:172.18.0.6', '203.0.113.8'],
+    ['fd00::5', '2001:db8::8, fd00::6', '2001:db8::8'],
+    ['172.18.0.5', '198.51.100.99, 172.18.0.5, 172.18.0.6', '172.18.0.5'],
+  ]) {
+    const response = await f.app.inject({
+      method: 'GET',
+      url: '/qa/client-ip',
+      remoteAddress,
+      headers: { 'x-forwarded-for': chain },
+    });
+    assert.equal(response.json().ip, expected);
+  }
+});
+
+test('an empty proxy configuration ignores forwarding headers', async (t) => {
+  const f = await fixture();
+  t.after(() => f.app.close());
+  const response = await f.app.inject({
+    method: 'GET',
+    url: '/qa/client-ip',
+    remoteAddress: '172.18.0.5',
+    headers: { 'x-forwarded-for': '198.51.100.99, 172.18.0.6' },
+  });
+  assert.equal(response.json().ip, '172.18.0.5');
+});
+
+test('proxy DNS refresh revokes old addresses and fails closed until resolution recovers', async () => {
+  let time = 1;
+  let address = '172.18.0.5';
+  let failed = false;
+  const proxies = createProxyTrust(['frontend'], {
+    now: () => time,
+    resolve: async () => {
+      if (failed) throw new Error('DNS unavailable');
+      return [{ address, family: 4 }];
+    },
+  });
+  await proxies.refresh();
+  assert.equal(proxies.trustProxy('172.18.0.5', 0), true);
+  assert.equal(proxies.trustProxy('172.18.0.5', 1), false);
+  time += 5001;
+  address = '172.18.0.9';
+  await proxies.refresh();
+  assert.equal(proxies.trustProxy('172.18.0.5', 0), false);
+  assert.equal(proxies.trustProxy('172.18.0.9', 0), true);
+  time += 5001;
+  failed = true;
+  await assert.rejects(proxies.refresh(), { statusCode: 503, code: 'PROXY_UNAVAILABLE' });
+  assert.equal(proxies.trustProxy('172.18.0.9', 0), false);
+  await assert.rejects(proxies.refresh(), { statusCode: 503 });
+  failed = false;
+  time += 5001;
+  await proxies.refresh();
+  assert.equal(proxies.trustProxy('172.18.0.9', 0), true);
 });

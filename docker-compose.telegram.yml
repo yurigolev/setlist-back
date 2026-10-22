@@ -47,6 +47,7 @@ services:
     env_file: .env.telegram.compose.local
     environment:
       DATABASE_URL: ${COMPOSE_DATABASE_URL:?}
+      TRUSTED_PROXY_CHAIN: pwa
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
       PORT: 3000

@@ -16,6 +16,7 @@ import { registerSetlistRoutes } from './routes/setlists.js';
 import { sql } from 'drizzle-orm';
 import { storage } from './storage.js';
 import { ApiError } from './errors.js';
+import { createProxyTrust } from './proxy.js';
 
 export async function buildApp(
   dependencies: {
@@ -23,7 +24,9 @@ export async function buildApp(
     initializeStorage?: boolean;
   } = {},
 ) {
+  const proxies = createProxyTrust(config.trustedProxyChain);
   const app = Fastify({
+    trustProxy: proxies.trustProxy,
     logger: {
       redact: [
         'req.headers.authorization',
@@ -38,6 +41,7 @@ export async function buildApp(
     requestIdHeader: 'x-request-id',
   });
   registerErrors(app);
+  proxies.register(app);
   await app.register(cors, {
     origin: config.pwaOrigin,
     credentials: true,

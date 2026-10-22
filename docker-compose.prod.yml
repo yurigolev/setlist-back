@@ -44,6 +44,7 @@ services:
     environment:
       PORT: 3000
       NODE_ENV: production
+      TRUSTED_PROXY_CHAIN: ${TRUSTED_PROXY_CHAIN:-frontend,caddy}
       DATABASE_URL: postgres://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
       PWA_ORIGIN: ${PWA_ORIGIN:?}
       TELEGRAM_CLIENT_ID: ${TELEGRAM_CLIENT_ID:?Set the production Telegram client ID}

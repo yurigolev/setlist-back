@@ -20,6 +20,8 @@ jobs:
           HUSKY: 0
       - name: Isolated authenticated integration and regression tests
         run: npm run test:qa
+      - name: Trusted proxy chain and forwarding spoof protection
+        run: npm run test:proxy
 
   publish:
     needs: verify

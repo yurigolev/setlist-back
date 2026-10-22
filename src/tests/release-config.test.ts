@@ -18,6 +18,7 @@ const env = {
   TELEGRAM_CLIENT_ID: 'qa-client',
   TELEGRAM_CLIENT_SECRET: 'qa-not-a-real-secret',
   TELEGRAM_REDIRECT_URI: 'https://release.example.invalid/v1/auth/telegram/callback',
+  TRUSTED_PROXY_CHAIN: 'frontend,caddy',
 };
 const args = [
   'compose',
@@ -42,6 +43,7 @@ test('production Compose passes Telegram configuration, uses secure cookies and 
     assert.equal(api[name], env[name]);
   assert.equal(api.AUTH_ALLOW_INSECURE_LOCAL_HTTP, 'false');
   assert.equal(api.NODE_ENV, 'production');
+  assert.equal(api.TRUSTED_PROXY_CHAIN, 'frontend,caddy');
   assert.equal(compose.services.postgres.volumes[0].source, 'pgdata');
   assert.equal(compose.services.minio.volumes[0].source, 'miniadata');
   for (const name of [
@@ -53,6 +55,26 @@ test('production Compose passes Telegram configuration, uses secure cookies and 
       assert.match((error as { stderr: string }).stderr, new RegExp(name));
       return true;
     });
+  }
+});
+
+test('production rejects missing proxy identities and broad trust specifications', async () => {
+  const runtime = {
+    ...env,
+    NODE_ENV: 'production',
+    DOTENV_PATH: '/dev/null',
+    DOTENV_QUIET: 'true',
+    DATABASE_URL: 'postgres://qa:qa@127.0.0.1:59999/qa',
+    MINIO_ENDPOINT: '127.0.0.1',
+    MINIO_ACCESS_KEY: 'qa',
+    MINIO_SECRET_KEY: 'qa',
+  };
+  for (const chain of ['', '0.0.0.0/0', '*', 'frontend,,caddy']) {
+    await assert.rejects(
+      exec(process.execPath, ['--input-type=module', '-e', 'await import("./dist/config.js")'], {
+        env: { ...runtime, TRUSTED_PROXY_CHAIN: chain },
+      }),
+    );
   }
 });
 

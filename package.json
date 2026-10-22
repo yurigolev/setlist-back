@@ -25,6 +25,7 @@
     "test": "node --test --test-concurrency=1 dist/tests/*.test.js",
     "start": "node dist/server.js",
     "test:qa": "node scripts/qa-auth-run.mjs",
+    "test:proxy": "node scripts/qa-proxy-run.mjs",
     "db:bootstrap-legacy": "node dist/ops/bootstrap-legacy.js",
     "db:legacy-owner": "node dist/ops/legacy-owner.js",
     "release:rehearse": "node scripts/rehearse-release.mjs",
