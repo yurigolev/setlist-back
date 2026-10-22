@@ -1,6 +1,6 @@
 ## Context
 
-Backend уже содержит минимальный Fastify-сервер и Docker Compose с PostgreSQL 16 и MinIO, но без доменной модели, миграций и API. Текущая PWA в соседнем репозитории хранит `Song`, `Attachment` и Blob-файлы в IndexedDB (`setlist-library`) и уже проверена в офлайн-сценарии. Пока это тестовая библиотека на временном origin; переносить её не нужно. См. мотивацию в `proposal.md`.
+Исходный минимальный Fastify backend уже развит в API одной библиотеки с PostgreSQL 16, MinIO, миграциями и полным снимком. Frontend в соседнем репозитории использует backend как источник истины и IndexedDB как подтверждённую копию. На 2026-10-06 выполнен HTTP production-деплой и перенос текущих локальных PostgreSQL/MinIO; прежние браузерные тестовые записи временного origin не импортировались. См. мотивацию в `proposal.md` и ниже фактический контекст эксплуатации.
 
 ## Goals / Non-Goals
 
@@ -35,7 +35,7 @@ Fastify выбран вместо NestJS: меньше скрытой магии
 
 ### Публичный API прототипа
 
-В первом релизе нет регистрации, токенов и проверки пользователя. API на постоянном HTTPS-адресе публичен: знание адреса достаточно для чтения и изменения библиотеки. Это принято для рабочего однопользовательского прототипа; CORS ограничивает только запросы из браузеров и не защищает API от прямых HTTP-запросов. MinIO и PostgreSQL не публикуются напрямую, их учётные данные вынесены из репозитория. Авторизация и разделение библиотек по пользователям оформляются отдельным change позже.
+В первом релизе нет регистрации, токенов и проверки пользователя. API публичен как на текущем HTTP IP, так и на будущем постоянном HTTPS-адресе: знание адреса достаточно для чтения и изменения библиотеки. Это принято для рабочего однопользовательского прототипа; CORS ограничивает только запросы из браузеров и не защищает API от прямых HTTP-запросов. MinIO и PostgreSQL не публикуются напрямую, их учётные данные вынесены из репозитория. Авторизация и разделение библиотек по пользователям оформляются отдельным change позже.
 
 ### Запись на сервер и получение снимка
 
@@ -81,5 +81,78 @@ IndexedDB хранит только подтверждённый серверо�
 
 ## Open Questions
 
-- Конкретные лимиты файла и размер первой библиотеки задаются конфигурацией при реализации upload; они не меняют протокол.
-- Провайдер VPS и доменное имя выбираются при развёртывании; контракт API от этого не меняется.
+- Способ защиты доступа и правила работы 3–4 пользователей ещё не согласованы; оформить отдельно до реализации входа.
+- VPS Selectel, домен `setlivo.ru`, лимиты 10 МиБ для изображения / 50 МиБ для MP3 уже выбраны и не являются открытыми вопросами. Конкретная TLS-конфигурация ещё не введена в production; её следующий этап описан ниже.
+
+## Фактическая эксплуатация — 2026-10-06, 14:29 MSK
+
+### Ресурсы и опубликованные релизы
+
+VPS Selectel `135.106.172.166`, Ubuntu 24.04.4 LTS amd64, около 4 ГБ RAM и 50 ГБ диска. Исходная оценка нагрузки: 3–4 пользователя, несколько обращений в день, до 500 песен; нагрузочный тест этого предела не проводился. Frontend: `yurigolev/setlist-front-pwa`, backend: `yurigolev/setlist-back`, оба публичные GitHub repositories, default branch `main`.
+
+Релизы при приёмке:
+
+- Backend: `08d011857114e7d3d167713e112337075951f20b`.
+- Frontend: `4d079bb73620ed66f1d9c3f1c883a08b063df5c6`.
+
+Не считать эти SHA текущими после последующих commits. Смотреть `docker inspect <container> --format '{{.Config.Image}}'`, текущий workflow и `/opt/setlist/deployments.log`.
+
+### Production Compose и доступ
+
+`/opt/setlist/docker-compose.prod.yml` запускает frontend nginx (порт80), API Fastify (внутренний3000), PostgreSQL16 (внутренний5432) и MinIO (внутренний9000), плюс одноразовую инициализацию владельца MinIO volume. Named volumes: `setlist_pgdata`, `setlist_miniadata`. `restart: unless-stopped` у постоянных сервисов, Docker включён при старте ОС; json logs ограничены 10 МБ × 3.
+
+HTTP-origin: `http://135.106.172.166`; `PWA_ORIGIN` пока такой же. Frontend `VITE_API_BASE_URL` пустой, `/v1` и `/health` проходят nginx → `api:3000`. `/health` проверяет готовность реального API. IPv4 host ports22/80; БД и MinIO наружу не опубликованы. UFW enabled, разрешены22/80; Docker публикации проверяются отдельно, а не только по UFW. HTTPS/443 пока не настроен. `Caddyfile` — сохранённый шаблон будущего TLS; он не используется текущим Compose и требует согласования с общей frontend/API маршрутизацией.
+
+Production env `/opt/setlist/.env.production` root-owned0600, пароли PostgreSQL и MinIO сгенерированы независимо. Env и секреты не входят в Git/Docker images. Нельзя выполнять `docker compose down -v` для production или менять project/volume names без плана сохранения данных.
+
+Admin SSH по отдельному локальному ключу: `ssh -i ~/.ssh/setlist_vps_admin_135_106_172_166 root@135.106.172.166`. Вход этим ключом проверен; PasswordAuthentication и KbdInteractiveAuthentication отключены, root допускается только по ключу. Ключ CI отдельный, не является admin key: `setlist-deploy`, порт22, authorized key с `restrict`, без docker group; sudo разрешает только root-owned `/usr/local/sbin/setlist-deploy`. Ключи хранятся на Mac вне repositories и не должны попадать в спеки своими значениями. Сохранять доступ к provider console на случай восстановления SSH.
+
+### Реализованный CI/CD
+
+`.github/workflows/backend.yml`:
+
+1. PR: npm ci, typecheck, db check, build, чистый Docker Compose и интеграционные tests; временные CI volumes удаляются только в runner.
+2. Push `main` / workflow_dispatch на `main`: успешные проверки → Linux amd64 Docker build на hosted runner → GHCR image `ghcr.io/yurigolev/setlist-back:<40hexSHA>` → SSH deploy.
+3. Полные SHA действий закреплены; публикация использует краткоживущий `GITHUB_TOKEN` с `packages:write`, не постоянный серверный token. GHCR packages при приёмке public; VPS читает anonymous.
+4. Variables: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PORT`; Secrets: `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS` с проверенным host key. Никакого `StrictHostKeyChecking=no`.
+5. Перед SSH workflow проверяет SHA текущего `main`, пропуская устаревший запуск. Backend deploy job имеет concurrency; frontend свой concurrency. Общий серверный `flock` на `/opt/setlist/deploy.lock` сериализует оба компонента и backups.
+
+`/usr/local/sbin/setlist-deploy` установлен из `scripts/deploy.sh`, root-owned0755. Принимает только `frontend|backend` и 40hexSHA, ограничивает GHCR repository, pull-ит image, перед backend update вызывает backup под тем же lock, меняет только соответствующий image variable и ждёт health до180сек. При сбое возвращает прошлый image/env. Обновления Compose, env и самого deploy-скрипта — отдельная admin операция: push кода автоматически доставляет image, а не произвольную новую конфигурацию сервера.
+
+Backend CMD выполняет migration перед сервером. Image rollback НЕ откатывает БД; новые миграции должны сохранять совместимость либо требовать отдельного проверенного восстановления DB+objects. Старый SHA можно подставить вручную как осознанный image rollback. Обычный workflow старого `main` skip-ит устаревший release. Деплой/backup могут кратко прерывать API; это не zero-downtime схема, релизы во время выступления не запускать. Автоматический image rollback реализован, но намеренно неготовый release на production для проверки отказа в этой приёмке не запускался.
+
+### Перенос данных и backup
+
+Источником были существующие текущие local Docker volumes `setlist-back_pgdata`, `setlist-back_miniadata`; локальные сервисы подняты, затем API кратко остановлен для согласованного dump+objects backup. Старый backup от25сентября содержал ревизию169/39песен/48вложений и не использован.
+
+Свежий снимок: ревизия193, 43 активные песни, 57 активных вложений, 252581634байта. `/Users/1g/Backups/setlist-migration-2026-10-06` приватен и вне Git; содержит `postgres.dump`, `objects/manifest.json`, object files и приватную `VPS-RUNBOOK.md`. Копия на VPS: `/opt/setlist/backups/setlist-migration-2026-10-06`.
+
+Контрольные суммы исходного переноса:
+
+- `postgres.dump`: `b25212d6582d23314f541f6ee819b4c241ef6f1f7e6223fb5c706b0f21914f07`.
+- `objects/manifest.json`: `2d0bcafd1c39ee8e0d8dfab7acd146c28b744502a7e17680455d2ea1aa0a3331`.
+
+Восстановление выполнено сначала в изолированном временном стеке, затем в свежей production DB: `pg_restore --clean --if-exists --no-owner --exit-on-error`, восстановление objects через operational CLI, запуск API с миграциями и `dist/ops/verify-restore.js`. Проверены связи, размеры и SHA-256 всех файлов. Original local volumes не удалены, API восстановлен. Восстановление `--clean` применять только к явно выбранной целевой БД с backup; не использовать как обычную команду выпуска или повторно поверх живых новых правок.
+
+`/usr/local/sbin/setlist-backup` из `scripts/production-backup.sh`: общий lock, остановка записей API, pg dump и object manifest/files, root-private snapshot env+Compose, COMPLETE marker, restart API через trap. Ежедневные systemd units `deploy/setlist-backup.service` / `.timer` установлены на VPS; timer active, расписание около04:30UTC (07:30MSK). Backup также выполнен вручную после restore и перед повторным backend release. Хранятся7новейших COMPLETE наборов; incomplete сохраняются для диагностики. Env snapshot содержит секреты: доступ к backup должен оставаться закрытым.
+
+Исходная миграционная копия вне VPS есть. Регулярный автоматический вынос последующих production backups вне VPS ещё НЕ настроен. Сам факт успешного backup не заменяет периодическое изолированное восстановление новых copies. Собранные backups на одном VPS не защищают от потери всего VPS.
+
+### Доказательства готовности HTTP-этапа
+
+- Typecheck / migration check / build и6изолированных integration tests прошли.
+- Финальный backend workflow `37452071835` и frontend `37452569466` успешны; backend deploy дополнительно повторён после переноса без потери библиотеки.
+- Все4постоянных services healthy при последней read-only проверке; timer active.
+- `verify-restore.js` подтвердил ревизию193/43песни/57файлов и checksums после restore и повторного deploy.
+- Public HTTP `/health`200, snapshot и внешние image/MP3 downloads проверены.
+- Frontend исправил HTTP SHA-256 fallback, после чего новый browser origin завершил скачивание всех57файлов и показал43песни. Подробности frontend-приёмки — в его design; это не проверка установленной PWA на телефоне.
+
+### DNS, HTTPS и следующие действия
+
+`setlivo.ru` зарегистрирован в Selectel до06.10.2027, автопродление включено. Телефон подтверждён, предупреждение пропало. Registrar NS — четыре `*.ns.selectel.ru`; root A=`135.106.172.166`, TTL300. Последняя проверка 2026-10-06 14:29MSK: Selectel authoritative A есть, authoritative `.ru` NXDOMAIN, в панели «Не делегирована». Это текущий внешний блокер выпуска публичного сертификата, а не ошибка Compose. Проверить DNS повторно перед продолжением; не менять уже правильные записи без основания.
+
+План: дождаться/проверить NS publication и A/AAAA/CAA; включить TLS proxy с persistent certificate storage и auto renewal; открыть443 и HTTP→HTTPS; установить `PWA_ORIGIN=https://setlivo.ru`; сохранить same-origin `/v1` и реальную `/health`. Текущий deploy healthcheck обращается к `http://127.0.0.1/health`: при новом proxy его нужно адаптировать так, чтобы редирект не давал ложный успех и не нарушались Actions/rollback. Получение и renewal сертификата проверять фактически, не по наличию Caddyfile.
+
+Переход IP→domain не требует повторного переноса PostgreSQL/MinIO. Новый browser origin имеет другую IndexedDB: потребуется полная синхронизация ~253МБ. Затем проверить установленную PWA, холодный offline launch, поиск, изображения и MP3 на реальном телефоне. `www` не согласован, записи для него не добавлены.
+
+TLS не добавляет авторизацию: API сейчас доступен всем знающим адрес. Защита доступа и способ входа должны быть согласованы отдельным change. Кроме HTTPS и offline acceptance остаются off-server recurring backup, restore drill и публикация main specs/архивация незакрытых changes. Данный документ не разрешает автоматически выполнить эти операции и не утверждает, что они сделаны.

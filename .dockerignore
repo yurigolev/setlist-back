@@ -1,5 +1,6 @@
 .env
 .env.production
+backups
 node_modules
 dist
 .git
@@ -8,3 +9,7 @@ dist
 openspec
 .github
 *.log
+
+.env.*
+!.env.example
+!.env.production.example

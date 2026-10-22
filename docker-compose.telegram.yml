@@ -1,0 +1,92 @@
+name: setlist-telegram
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:?}
+    ports:
+      - '127.0.0.1:46641:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  minio-volume-init:
+    image: alpine/minio:RELEASE.2025-10-15T17-29-55Z
+    user: '0:0'
+    entrypoint: ['sh', '-c', 'chown -R 100:101 /data']
+    volumes:
+      - miniadata:/data
+    restart: 'no'
+  minio:
+    image: alpine/minio:RELEASE.2025-10-15T17-29-55Z
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?}
+    command: server /data
+    depends_on:
+      minio-volume-init:
+        condition: service_completed_successfully
+    ports:
+      - '127.0.0.1:46642:9000'
+    volumes:
+      - miniadata:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://localhost:9000/minio/health/live']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  api:
+    build: .
+    env_file: .env.telegram.compose.local
+    environment:
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:?}
+      TRUSTED_PROXY_CHAIN: pwa
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      PORT: 3000
+    ports:
+      - '127.0.0.1:46543:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+  pwa:
+    build:
+      context: ../mobile-setlist
+      args:
+        VITE_API_BASE_URL: ''
+    environment:
+      BACKEND_URL: http://api:3000
+    ports:
+      - '127.0.0.1:46544:80'
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  pgdata:
+    external: true
+    name: setlist-telegram-pgdata
+  miniadata:
+    external: true
+    name: setlist-telegram-miniadata

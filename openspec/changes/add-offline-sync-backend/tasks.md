@@ -40,6 +40,37 @@
 ## 7. Эксплуатационная готовность
 
 - [x] 7.1 Добавить скрипты резервного копирования PostgreSQL и MinIO, а также документированную проверку восстановления в изолированном окружении.
-- [x] 7.2 Добавить production-конфигурацию reverse proxy/HTTPS, секретов и PWA origin; API остаётся публичным, MinIO и PostgreSQL недоступны напрямую.
+- [x] 7.2 Добавить production HTTP Compose, секреты и PWA origin, оставить шаблон будущего HTTPS; API публичен, MinIO и PostgreSQL недоступны напрямую. Реальный TLS не входит в эту отметку и остаётся в разделе10.
 - [x] 7.3 Настроить CI для typecheck, тестов, миграций и сборки контейнера.
 - [x] 7.4 Провести итоговую проверку публичного API на утечку секретов, лимиты загрузки и приёмку с реальными изображениями и MP3.
+
+## 8. Фактический HTTP-деплой и CI/CD — 2026-10-06
+
+- [x] 8.1 Опубликовать готовый backend в `main` GitHub и запустить hosted verify → GHCR SHA image → SSH deploy; подтвердить финальный workflow.
+- [x] 8.2 Подготовить пустой Selectel VPS: Docker/Compose, restart policy, ограниченные logs, SSH keys, key-only login, отдельный deploy user и проверенный known_hosts.
+- [x] 8.3 Установить root-owned production Compose/env/deploy/backup и минимальный sudo contract; наружу только22/80, PostgreSQL/MinIO internal.
+- [x] 8.4 Реализовать общий flock, backup перед backend replacement, healthcheck и image rollback без обещания reverse migrations.
+- [x] 8.5 Исправить OpenAPI health contract и проверить integration tests на изолированных clean volumes.
+
+## 9. Сохранение текущей локальной библиотеки
+
+- [x] 9.1 Создать свежий согласованный backup текущих local PostgreSQL/MinIO вне Git вместо устаревшего September backup; сохранить source volumes.
+- [x] 9.2 Проверить isolated restore и перенести DB+objects на выбранный свежий VPS: revision193 / 43songs / 57attachments.
+- [x] 9.3 Проверить checksums и связи всех57objects, внешние image/MP3 downloads и сохранность после повторного automatic deploy.
+- [x] 9.4 Установить daily backup timer, retention7COMPLETE и выполнить production backup; сохранить локальную оригинальную migration copy.
+- [ ] 9.5 Выбрать off-server destination и настроить регулярный безопасный вынос production backups с retention/проверкой доступа.
+- [ ] 9.6 Проверить изолированное восстановление нового production backup без воздействия на живые volumes; записать результат и практическое время recovery.
+
+## 10. Домен и HTTPS — осталось
+
+- [x] 10.1 Зафиксировать выбранный домен `setlivo.ru`, подтверждённый телефон, четыре Selectel NS и root A=135.106.172.166 TTL300.
+- [ ] 10.2 Проверить опубликованную делегацию `.ru`, public A и отсутствие ошибочных AAAA/CAA; последнее подтверждение пока NXDOMAIN.
+- [ ] 10.3 Подготовить и валидировать TLS proxy общей PWA/API, persistent certificates и auto renewal, открыть443 и реализовать HTTP→HTTPS.
+- [ ] 10.4 Обновить PWA_ORIGIN на https://setlivo.ru и deploy healthcheck; проверить реальные API health, выпуск сертификата, HTTPS snapshot/content и совместимость Actions/backup/rollback.
+- [ ] 10.5 Совместно с frontend завершить новую origin sync и установленную PWA offline acceptance на телефоне, не перенося БД повторно.
+- [ ] 10.6 Обновить docs/env examples/операционную памятку под фактический HTTPS и критерии renewal/recovery.
+
+## 11. Отдельные следующие изменения
+
+- [ ] 11.1 Согласовать и оформить change защиты доступа: public API остаётся открытым даже после TLS; способ входа не выбран.
+- [ ] 11.2 После оставшейся приёмки согласовать sync main specs и archive; это обновление сохраняет active changes и не выполняет archive.
