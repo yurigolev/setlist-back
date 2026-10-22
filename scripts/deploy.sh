@@ -39,11 +39,11 @@ if [[ $service == api ]]; then
         try {
           const proxy = new URL(process.env.HTTPS_PROXY);
           if (!["http:", "https:"].includes(proxy.protocol) || !proxy.hostname || proxy.hash || proxy.search) throw new Error();
+          const { setGlobalProxyFromEnv } = await import("node:http");
+          setGlobalProxyFromEnv();
         } catch {
           throw new Error("Production HTTPS proxy must be a valid HTTP(S) CONNECT proxy URL");
         }
-        const { setGlobalProxyFromEnv } = await import("node:http");
-        setGlobalProxyFromEnv();
       }
       // A browser may reach Telegram while the VPS cannot exchange codes.
       // Check the actual new image egress before stopping any running API.
