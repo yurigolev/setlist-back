@@ -1,3 +1,5 @@
+> Historical Telegram documentation. Current local implementation: [YANDEX_AUTH.md](YANDEX_AUTH.md); future rollout: [YANDEX_PRODUCTION.md](YANDEX_PRODUCTION.md).
+
 # Telegram для setlivo.ru
 
 Подготовлено локально 22 октября 2026. Production-конфигурация и приложение на сервере не менялись.

@@ -302,7 +302,7 @@ test(
   { timeout: 10000 },
   async () => {
     // A second real signed mock-provider login leaves the suite's owner session intact.
-    const start = await fetch(`${base}/v1/auth/telegram/start?returnTo=/`, { redirect: 'manual' });
+    const start = await fetch(`${base}/v1/auth/yandex/start?returnTo=/`, { redirect: 'manual' });
     assert.equal(start.status, 302);
     const authorization = new URL(start.headers.get('location')!);
     const loginCookie = start.headers
@@ -310,7 +310,7 @@ test(
       .find((value) => value.startsWith('setlist_login='))!
       .split(';')[0];
     const callback = await fetch(
-      `${base}/v1/auth/telegram/callback?code=qa-owner&state=${encodeURIComponent(authorization.searchParams.get('state')!)}`,
+      `${base}/v1/auth/yandex/callback?code=qa-owner&state=${encodeURIComponent(authorization.searchParams.get('state')!)}`,
       { redirect: 'manual', headers: { cookie: loginCookie } },
     );
     assert.equal(callback.status, 302);

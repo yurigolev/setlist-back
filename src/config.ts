@@ -10,14 +10,14 @@ const schema = z.object({
     .pipe(
       z.array(z.string().regex(/^(?=.{1,253}$)[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$/)).max(8),
     ),
-  TELEGRAM_CLIENT_ID: z.string().optional(),
-  TELEGRAM_CLIENT_SECRET: z.string().optional(),
-  TELEGRAM_REDIRECT_URI: z.string().url().optional(),
+  YANDEX_CLIENT_ID: z.string().optional(),
+  YANDEX_CLIENT_SECRET: z.string().optional(),
+  YANDEX_REDIRECT_URI: z.string().url().optional(),
   AUTH_ALLOW_INSECURE_LOCAL_HTTP: z.enum(['true', 'false']).default('false'),
   AUTH_SESSION_TTL_SECONDS: z.coerce.number().int().min(60).max(2592000).default(900),
   AUTH_REFRESH_TTL_SECONDS: z.coerce.number().int().min(60).max(31536000).default(7776000),
-  LEGACY_OWNER_TELEGRAM_SUB: z.string().min(1).optional(),
-  LEGACY_OWNER_TELEGRAM_ISSUER: z.literal('https://oauth.telegram.org').optional(),
+  LEGACY_OWNER_YANDEX_SUB: z.string().min(1).optional(),
+  LEGACY_OWNER_YANDEX_ISSUER: z.literal('https://login.yandex.ru').optional(),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   DATABASE_URL: z.string().url(),
   PWA_ORIGIN: z.string().url(),
@@ -43,23 +43,23 @@ const localHttp = (url: URL) =>
   url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
 const pwaUrl = new URL(env.PWA_ORIGIN);
 if (pwaUrl.origin !== env.PWA_ORIGIN) throw new Error('PWA_ORIGIN must be an exact origin');
-const redirectUrl = env.TELEGRAM_REDIRECT_URI ? new URL(env.TELEGRAM_REDIRECT_URI) : undefined;
+const redirectUrl = env.YANDEX_REDIRECT_URI ? new URL(env.YANDEX_REDIRECT_URI) : undefined;
 const insecureLocal =
   env.AUTH_ALLOW_INSECURE_LOCAL_HTTP === 'true' &&
   localHttp(pwaUrl) &&
   (!redirectUrl || localHttp(redirectUrl));
 if (env.AUTH_ALLOW_INSECURE_LOCAL_HTTP === 'true' && !insecureLocal)
   throw new Error('Insecure auth cookies are restricted to explicit localhost HTTP origins');
-const authEnabled = Boolean(env.TELEGRAM_CLIENT_ID && env.TELEGRAM_CLIENT_SECRET && redirectUrl);
+const authEnabled = Boolean(env.YANDEX_CLIENT_ID && env.YANDEX_CLIENT_SECRET && redirectUrl);
 if (
   env.NODE_ENV === 'production' &&
   (!authEnabled ||
     insecureLocal ||
     redirectUrl?.origin !== pwaUrl.origin ||
-    redirectUrl?.pathname !== '/v1/auth/telegram/callback')
+    redirectUrl?.pathname !== '/v1/auth/yandex/callback')
 )
   throw new Error(
-    'Production requires Telegram credentials and the exact same-origin HTTPS callback /v1/auth/telegram/callback',
+    'Production requires Yandex credentials and the exact same-origin HTTPS callback /v1/auth/yandex/callback',
   );
 if (
   authEnabled &&
@@ -69,22 +69,22 @@ if (
     redirectUrl!.hash ||
     redirectUrl!.search)
 )
-  throw new Error('Telegram auth requires HTTPS URLs, except explicitly allowed localhost HTTP');
-if (Boolean(env.LEGACY_OWNER_TELEGRAM_ISSUER) !== Boolean(env.LEGACY_OWNER_TELEGRAM_SUB))
+  throw new Error('Yandex auth requires HTTPS URLs, except explicitly allowed localhost HTTP');
+if (Boolean(env.LEGACY_OWNER_YANDEX_ISSUER) !== Boolean(env.LEGACY_OWNER_YANDEX_SUB))
   throw new Error('Legacy owner requires both explicit issuer and subject');
 export const config = {
   trustedProxyChain: env.TRUSTED_PROXY_CHAIN,
   auth: {
     enabled: authEnabled,
-    clientId: env.TELEGRAM_CLIENT_ID ?? '',
-    clientSecret: env.TELEGRAM_CLIENT_SECRET ?? '',
-    redirectUri: env.TELEGRAM_REDIRECT_URI ?? '',
+    clientId: env.YANDEX_CLIENT_ID ?? '',
+    clientSecret: env.YANDEX_CLIENT_SECRET ?? '',
+    redirectUri: env.YANDEX_REDIRECT_URI ?? '',
     pwaOrigin: env.PWA_ORIGIN,
     secureCookies: !insecureLocal,
     sessionTtlSeconds: env.AUTH_SESSION_TTL_SECONDS,
     refreshTtlSeconds: env.AUTH_REFRESH_TTL_SECONDS,
-    legacyOwnerIssuer: env.LEGACY_OWNER_TELEGRAM_ISSUER,
-    legacyOwnerSub: env.LEGACY_OWNER_TELEGRAM_SUB,
+    legacyOwnerIssuer: env.LEGACY_OWNER_YANDEX_ISSUER,
+    legacyOwnerSub: env.LEGACY_OWNER_YANDEX_SUB,
   },
   port: env.PORT,
   databaseUrl: env.DATABASE_URL,

@@ -9,8 +9,8 @@ import { registerAttachmentRoutes } from './routes/attachments.js';
 import { db, pool } from './db/client.js';
 import { registerAuthRoutes } from './auth/routes.js';
 import { PgAuthStore } from './auth/store.js';
-import { createTelegramOidc } from './auth/oidc.js';
-import type { AuthConfig, AuthStore, TelegramOidc } from './auth/types.js';
+import { createYandexOAuth } from './auth/yandex.js';
+import type { AuthConfig, AuthStore, YandexOAuth } from './auth/types.js';
 import { authorizeScope, registerPrivateAuthorization } from './auth/permissions.js';
 import { registerSetlistRoutes } from './routes/setlists.js';
 import { sql } from 'drizzle-orm';
@@ -20,7 +20,7 @@ import { createProxyTrust } from './proxy.js';
 
 export async function buildApp(
   dependencies: {
-    auth?: { config: AuthConfig; store: AuthStore; oidc: TelegramOidc };
+    auth?: { config: AuthConfig; store: AuthStore; provider: YandexOAuth };
     initializeStorage?: boolean;
   } = {},
 ) {
@@ -50,7 +50,7 @@ export async function buildApp(
   const auth = dependencies.auth ?? {
     config: config.auth,
     store: new PgAuthStore(pool),
-    oidc: createTelegramOidc(config.auth),
+    provider: createYandexOAuth(config.auth),
   };
   await registerAuthRoutes(app, auth);
   app.get('/health', async () => {

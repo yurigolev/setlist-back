@@ -43,13 +43,13 @@ const env = {
   MINIO_ACCESS_KEY: 'qa_minio',
   MINIO_SECRET_KEY: minioPassword,
   MINIO_BUCKET: `setlist-qa-${suffix}`,
-  TELEGRAM_CLIENT_ID: 'qa-client',
-  TELEGRAM_CLIENT_SECRET: randomBytes(24).toString('hex'),
-  TELEGRAM_REDIRECT_URI: `${serve ? origin : api}/v1/auth/telegram/callback`,
+  YANDEX_CLIENT_ID: 'qa-client',
+  YANDEX_CLIENT_SECRET: randomBytes(24).toString('hex'),
+  YANDEX_REDIRECT_URI: `${serve ? origin : api}/v1/auth/yandex/callback`,
   AUTH_ALLOW_INSECURE_LOCAL_HTTP: 'true',
   AUTH_SESSION_TTL_SECONDS: '3600',
-  LEGACY_OWNER_TELEGRAM_ISSUER: 'https://oauth.telegram.org',
-  LEGACY_OWNER_TELEGRAM_SUB: 'qa-owner-subject',
+  LEGACY_OWNER_YANDEX_ISSUER: 'https://login.yandex.ru',
+  LEGACY_OWNER_YANDEX_SUB: 'qa-owner-subject',
   TEST_API_URL: api,
   TEST_ORIGIN: origin,
 };
@@ -182,7 +182,7 @@ try {
     await delay(200);
   }
   if (!ready) throw new Error('QA API readiness timed out');
-  const start = await fetch(`${api}/v1/auth/telegram/start?returnTo=/`, { redirect: 'manual' });
+  const start = await fetch(`${api}/v1/auth/yandex/start?returnTo=/`, { redirect: 'manual' });
   const authorization = new URL(start.headers.get('location') ?? '');
   const loginCookie = start.headers
     .getSetCookie()
@@ -191,7 +191,7 @@ try {
   if (start.status !== 302 || !loginCookie || !authorization.searchParams.get('state'))
     throw new Error('QA login start failed');
   const callback = await fetch(
-    `${api}/v1/auth/telegram/callback?code=qa-owner&state=${encodeURIComponent(authorization.searchParams.get('state'))}`,
+    `${api}/v1/auth/yandex/callback?code=qa-owner&state=${encodeURIComponent(authorization.searchParams.get('state'))}`,
     { redirect: 'manual', headers: { cookie: loginCookie } },
   );
   const sessionCookie = callback.headers

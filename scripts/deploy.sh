@@ -28,10 +28,28 @@ if [[ $service == api ]]; then
   BACKEND_IMAGE="$image" "${compose[@]}" run --rm --no-deps -T api node --input-type=module -e '
     const { config } = await import("./dist/config.js");
     const auth = config.auth;
-    const expected = `${config.pwaOrigin}/v1/auth/telegram/callback`;
+    const expected = `${config.pwaOrigin}/v1/auth/yandex/callback`;
     // Pre-auth images remain available for an explicit rollback of both clients.
     if (auth !== undefined && (!auth.enabled || !auth.secureCookies || !config.pwaOrigin.startsWith("https://") || auth.redirectUri !== expected)) {
-      throw new Error("Production Telegram configuration is missing or callback does not match PWA_ORIGIN");
+      throw new Error("Production Yandex configuration is missing or callback does not match PWA_ORIGIN");
+    }
+    if (auth !== undefined) {
+      // Public responses prove TLS and routing, not successful user consent.
+      // Run from the new API image before backup or stopping the running API.
+      for (const [url, expectedStatus] of [
+        ["https://oauth.yandex.ru/authorize", 302],
+        ["https://login.yandex.ru/info?format=json", 401],
+      ]) {
+        try {
+          const response = await fetch(url, {
+            redirect: "manual", signal: AbortSignal.timeout(5000),
+          });
+          if (response.status !== expectedStatus) throw new Error("Unexpected provider response");
+          await response.body?.cancel();
+        } catch {
+          throw new Error("Production API cannot reach trusted Yandex OAuth/profile endpoints; deployment aborted before backup or restart");
+        }
+      }
     }
   '
   /usr/local/sbin/setlist-backup --lock-held

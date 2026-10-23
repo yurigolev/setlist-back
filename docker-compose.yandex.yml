@@ -1,4 +1,4 @@
-name: setlist-telegram
+name: setlist-yandex
 services:
   postgres:
     image: postgres:16-alpine
@@ -44,7 +44,7 @@ services:
       retries: 30
   api:
     build: .
-    env_file: .env.telegram.compose.local
+    env_file: .env.yandex.compose.local
     environment:
       DATABASE_URL: ${COMPOSE_DATABASE_URL:?}
       TRUSTED_PROXY_CHAIN: pwa
@@ -86,7 +86,7 @@ services:
 volumes:
   pgdata:
     external: true
-    name: setlist-telegram-pgdata
+    name: setlist-yandex-pgdata
   miniadata:
     external: true
-    name: setlist-telegram-miniadata
+    name: setlist-yandex-miniadata

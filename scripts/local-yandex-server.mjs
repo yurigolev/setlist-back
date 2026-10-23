@@ -3,25 +3,25 @@ import { parse } from 'dotenv';
 
 // This launcher serves the production auth implementation against the explicitly
 // configured local stack. It neither migrates data nor creates memberships.
-Object.assign(process.env, parse(readFileSync('.env.telegram.runtime.local')));
+Object.assign(process.env, parse(readFileSync('.env.yandex.runtime.local')));
 process.env.DOTENV_CONFIG_PATH = '/dev/null';
 
 let database;
 try {
   database = new URL(process.env.DATABASE_URL);
 } catch {
-  throw new Error('Configure the local DATABASE_URL before starting Telegram');
+  throw new Error('Configure the local DATABASE_URL before starting Yandex');
 }
 const local = (hostname) => ['127.0.0.1', 'localhost', '[::1]'].includes(hostname);
 if (!local(database.hostname) || !database.port || database.port === '5432') {
-  throw new Error('Local Telegram requires a separate loopback database port');
+  throw new Error('Local Yandex requires a separate loopback database port');
 }
 if (
   !local(process.env.MINIO_ENDPOINT) ||
   !process.env.MINIO_PORT ||
   process.env.MINIO_PORT === '9000'
 ) {
-  throw new Error('Local Telegram requires separate loopback object storage');
+  throw new Error('Local Yandex requires separate loopback object storage');
 }
 
 const { buildApp } = await import('../dist/app.js');
