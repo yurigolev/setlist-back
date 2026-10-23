@@ -1,6 +1,6 @@
 # Setlist backend
 
-Fastify API for collaborative setlists. Telegram OIDC authenticates users; database membership controls songs and media. Owner/editor can edit and delete content; viewer can read. Owners manage roles and one-time invitations. New users never inherit legacy data. Setup and local verification: [docs/TELEGRAM_AUTH.md](docs/TELEGRAM_AUTH.md).
+Fastify API for collaborative setlists. Yandex OAuth authenticates users; database membership controls songs and media. Owner/editor can edit and delete content; viewer can read. Owners manage roles and one-time invitations. New users never inherit legacy data. Setup and local verification: [docs/YANDEX_AUTH.md](docs/YANDEX_AUTH.md).
 
 ## Local start
 
@@ -12,9 +12,9 @@ Use `docker compose down` to stop without deleting data. `docker compose down -v
 
 Image uploads are limited to 10 MiB and MP3 uploads to 50 MiB by default; configure `MAX_IMAGE_BYTES` and `MAX_MP3_BYTES` to change them. The object bucket is private and files are delivered through the API.
 
-## Persistent local Telegram development
+## Persistent local Yandex development
 
-With `.env.telegram.runtime.local` configured, run `npm run local:up` and open **http://127.0.0.1:46544**. PostgreSQL, MinIO, API and PWA run in Docker with persistent external volumes and automatic restart. Stop: `npm run local:stop`. Back up: `npm run local:backup -- /absolute/path/to/new-backup`. See [local setup and recovery](docs/TELEGRAM_AUTH.md#persistent-local-telegram-stack).
+With `.env.yandex.runtime.local` configured, run `npm run local:up` and open **http://127.0.0.1:46544**. PostgreSQL, MinIO, API and PWA run in Docker with persistent external volumes and automatic restart. Stop: `npm run local:stop`. Back up: `npm run local:backup -- /absolute/path/to/new-backup`. See [local setup and recovery](docs/YANDEX_AUTH.md#persistent-local-yandex-stack).
 
 ## API contract
 
@@ -32,9 +32,9 @@ Run `sh scripts/verify-restore.sh /absolute/path/to/backup` to create an isolate
 
 ## Production prototype
 
-Production uses prebuilt GHCR frontend/backend images with PostgreSQL and MinIO on an internal Compose network. Only the frontend publishes HTTP port 80. Setup, GitHub Actions, backups, and rollback: [docs/PRODUCTION_DEPLOY.md](docs/PRODUCTION_DEPLOY.md). HTTPS and domain configuration follow later; public HTTP does not enable installed PWA/offline service-worker support. This local auth implementation has not been deployed or tested with real Telegram consent. Configure HTTPS, Telegram client credentials and the explicit verified legacy owner before enabling private access.
+Production uses prebuilt GHCR frontend/backend images with PostgreSQL and MinIO on an internal Compose network. Only the frontend publishes HTTP port 80. Setup, GitHub Actions, backups, and rollback: [docs/PRODUCTION_DEPLOY.md](docs/PRODUCTION_DEPLOY.md). The Yandex replacement is being verified locally; production remains on the previous Telegram release until a separate authorized rollout. Configure HTTPS, Yandex client credentials and verify the intended owner before rollout.
 
-Collaborative setlists use `/v1/setlists/:setlistId`, database roles and one-time invitations. Existing data is unowned until explicit local `npm run db:bootstrap-legacy` after verified owner login; this never runs at startup. See [Telegram auth and local adoption](docs/TELEGRAM_AUTH.md) and [OpenAPI](openapi.yaml). Songs belong to one setlist; copying creates independent songs and media objects.
+Collaborative setlists use `/v1/setlists/:setlistId`, database roles and one-time invitations. Existing data is unowned until explicit local `npm run db:bootstrap-legacy` after verified owner login; this never runs at startup. See [Yandex auth and local adoption](docs/YANDEX_AUTH.md) and [OpenAPI](openapi.yaml). Songs belong to one setlist; copying creates independent songs and media objects.
 
 ## Formatting and commit checks
 

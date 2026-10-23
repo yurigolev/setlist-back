@@ -25,40 +25,29 @@ docker pull "$image"
 if [[ $service == api ]]; then
   # Validate the new image with the installed Compose/env before pausing writers.
   # Override CMD: this preflight imports configuration without running migrations.
-  BACKEND_IMAGE="$image" "${compose[@]}" run --rm --no-deps -T -e NODE_USE_ENV_PROXY=0 api node --input-type=module -e '
+  BACKEND_IMAGE="$image" "${compose[@]}" run --rm --no-deps -T api node --input-type=module -e '
     const { config } = await import("./dist/config.js");
     const auth = config.auth;
-    const expected = `${config.pwaOrigin}/v1/auth/telegram/callback`;
+    const expected = `${config.pwaOrigin}/v1/auth/yandex/callback`;
     // Pre-auth images remain available for an explicit rollback of both clients.
     if (auth !== undefined && (!auth.enabled || !auth.secureCookies || !config.pwaOrigin.startsWith("https://") || auth.redirectUri !== expected)) {
-      throw new Error("Production Telegram configuration is missing or callback does not match PWA_ORIGIN");
+      throw new Error("Production Yandex configuration is missing or callback does not match PWA_ORIGIN");
     }
     if (auth !== undefined) {
-      // Parse a proxy URL without letting startup errors echo credentials.
-      if (process.env.HTTPS_PROXY) {
+      // Public responses prove TLS and routing, not successful user consent.
+      // Run from the new API image before backup or stopping the running API.
+      for (const [url, expectedStatus] of [
+        ["https://oauth.yandex.ru/authorize", 302],
+        ["https://login.yandex.ru/info?format=json", 401],
+      ]) {
         try {
-          const proxy = new URL(process.env.HTTPS_PROXY);
-          if (!["http:", "https:"].includes(proxy.protocol) || !proxy.hostname || proxy.hash || proxy.search) throw new Error();
-          const { setGlobalProxyFromEnv } = await import("node:http");
-          setGlobalProxyFromEnv();
-        } catch {
-          throw new Error("Production HTTPS proxy must be a valid HTTP(S) CONNECT proxy URL");
-        }
-      }
-      // A browser may reach Telegram while the VPS cannot exchange codes.
-      // Check the actual new image egress before stopping any running API.
-      for (const path of ["/.well-known/openid-configuration", "/.well-known/jwks.json"]) {
-        try {
-          const response = await fetch(`https://oauth.telegram.org${path}`, {
-            redirect: "error", signal: AbortSignal.timeout(5000),
+          const response = await fetch(url, {
+            redirect: "manual", signal: AbortSignal.timeout(5000),
           });
-          if (!response.ok) throw new Error("HTTP failure");
-          const body = await response.json();
-          if (path.endsWith("openid-configuration")
-            ? body.issuer !== "https://oauth.telegram.org"
-            : !Array.isArray(body.keys) || !body.keys.length) throw new Error("Invalid metadata");
+          if (response.status !== expectedStatus) throw new Error("Unexpected provider response");
+          await response.body?.cancel();
         } catch {
-          throw new Error("Production API cannot reach trusted Telegram metadata/JWKS; deployment aborted before backup or restart");
+          throw new Error("Production API cannot reach trusted Yandex OAuth/profile endpoints; deployment aborted before backup or restart");
         }
       }
     }

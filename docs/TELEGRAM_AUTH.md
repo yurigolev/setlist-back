@@ -1,3 +1,5 @@
+> Historical Telegram documentation. Current local implementation: [YANDEX_AUTH.md](YANDEX_AUTH.md); future rollout: [YANDEX_PRODUCTION.md](YANDEX_PRODUCTION.md).
+
 # Telegram authentication (local implementation)
 
 The backend uses Telegram's current OIDC Authorization Code Flow, not the archived iframe widget. Configure the bot's Login Widget in BotFather with the exact website origin and callback URL; keep its signing algorithm **RS256**. Request scopes are `openid profile`. Documentation: https://core.telegram.org/bots/telegram-login .

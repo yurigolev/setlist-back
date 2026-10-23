@@ -91,13 +91,13 @@ try {
   const spoofed = (await fromClient('client_a', '/qa/client-ip', forged))[0];
   assert.deepEqual(spoofed.body, a.body, 'Public edge must discard forged forwarding metadata');
   for (const client of ['client_a', 'client_b']) {
-    const responses = await fromClient(client, '/v1/auth/telegram/start', {}, 20);
+    const responses = await fromClient(client, '/v1/auth/yandex/start', {}, 20);
     assert.ok(
       responses.every((r) => r.status === 302),
       `${client} must have its own 20-request limit`,
     );
     assert.equal(
-      (await fromClient(client, '/v1/auth/telegram/start', forged))[0].status,
+      (await fromClient(client, '/v1/auth/yandex/start', forged))[0].status,
       429,
       'Forged metadata cannot bypass an exhausted client limit',
     );

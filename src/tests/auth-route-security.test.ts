@@ -5,7 +5,7 @@ import Fastify from 'fastify';
 import { registerErrors } from '../errors.js';
 import { registerAuthRoutes, tokenHash } from '../auth/routes.js';
 import { createProxyTrust } from '../proxy.js';
-import { TelegramOidcError } from '../auth/oidc.js';
+import { YandexOAuthError } from '../auth/yandex.js';
 import type {
   AuthConfig,
   AuthSession,
@@ -111,7 +111,7 @@ const config: AuthConfig = {
   enabled: true,
   clientId: 'qa-client',
   clientSecret: 'synthetic',
-  redirectUri: 'http://127.0.0.1:46543/v1/auth/telegram/callback',
+  redirectUri: 'http://127.0.0.1:46543/v1/auth/yandex/callback',
   pwaOrigin: 'http://127.0.0.1:46544',
   secureCookies: false,
   sessionTtlSeconds: 3600,
@@ -163,15 +163,15 @@ async function fixture(
   await registerAuthRoutes(app, {
     config: { ...config, enabled },
     store,
-    oidc: {
-      authorizationUrl(state, verifier, nonce) {
-        return `https://oauth.telegram.org/auth?state=${state}&nonce=${nonce}&code_challenge=${verifier}`;
+    provider: {
+      authorizationUrl(state, verifier) {
+        return `https://oauth.yandex.ru/authorize?state=${state}&code_challenge=${verifier}`;
       },
       async authenticate() {
         authenticated++;
         if (failure) throw failure.error;
         return {
-          issuer: 'https://oauth.telegram.org',
+          issuer: 'https://login.yandex.ru',
           subject: 'opaque-sub',
           displayName: 'QA User',
         };
@@ -182,7 +182,7 @@ async function fixture(
   async function start() {
     const response = await app.inject({
       method: 'GET',
-      url: '/v1/auth/telegram/start?returnTo=/songs',
+      url: '/v1/auth/yandex/start?returnTo=/songs',
     });
     assert.equal(response.statusCode, 302);
     assert.match(String(response.headers['cache-control']), /no-store/);
@@ -193,7 +193,7 @@ async function fixture(
   async function callback(state: string, cookie: string) {
     return app.inject({
       method: 'GET',
-      url: `/v1/auth/telegram/callback?code=qa-code&state=${state}`,
+      url: `/v1/auth/yandex/callback?code=qa-code&state=${state}`,
       headers: { cookie },
     });
   }
@@ -312,7 +312,7 @@ test('session expiry, Unicode CSRF, origin checks and logout revoke only an auth
 test('missing configuration redirects login to a generic unavailable screen', async (t) => {
   const f = await fixture(false);
   t.after(() => f.app.close());
-  const response = await f.app.inject({ method: 'GET', url: '/v1/auth/telegram/start' });
+  const response = await f.app.inject({ method: 'GET', url: '/v1/auth/yandex/start' });
   assert.equal(response.statusCode, 302);
   assert.equal(response.headers.location, `${config.pwaOrigin}/login?authError=unavailable`);
   assert.match(String(response.headers['cache-control']), /no-store/);
@@ -322,7 +322,7 @@ test('missing configuration redirects login to a generic unavailable screen', as
 test('provider outages are unavailable, invalid tokens are invalid, and diagnostics omit secrets', async (t) => {
   for (const [error, category, diagnostic] of [
     [
-      new TelegramOidcError('unavailable', {
+      new YandexOAuthError('unavailable', {
         stage: 'token_exchange',
         reason: 'network_timeout',
         transportCode: 'ETIMEDOUT',
@@ -331,18 +331,14 @@ test('provider outages are unavailable, invalid tokens are invalid, and diagnost
       { stage: 'token_exchange', reason: 'network_timeout', transportCode: 'ETIMEDOUT' },
     ],
     [
-      new TelegramOidcError('invalid', {
-        stage: 'id_token',
-        reason: 'jwt_error',
-        joseCode: 'ERR_JWT_CLAIM_VALIDATION_FAILED',
-        claim: 'nonce',
+      new YandexOAuthError('invalid', {
+        stage: 'profile_response',
+        reason: 'invalid_profile',
       }),
       'invalid',
       {
-        stage: 'id_token',
-        reason: 'jwt_error',
-        joseCode: 'ERR_JWT_CLAIM_VALIDATION_FAILED',
-        claim: 'nonce',
+        stage: 'profile_response',
+        reason: 'invalid_profile',
       },
     ],
     [
@@ -359,7 +355,7 @@ test('provider outages are unavailable, invalid tokens are invalid, and diagnost
     assert.equal(denied.headers.location, `${config.pwaOrigin}/login?authError=${category}`);
     assert.equal(f.store.sessions.size, 0);
     assert.equal(f.store.attempts.size, 0);
-    assert.deepEqual(JSON.parse(logs.join('')).telegramAuth, diagnostic);
+    assert.deepEqual(JSON.parse(logs.join('')).yandexAuth, diagnostic);
     for (const sensitive of [grant.state, grant.cookie, 'qa-code', 'client_secret', 'provider JWT'])
       assert.ok(!logs.join('').includes(sensitive));
   }
@@ -469,7 +465,7 @@ test('legacy bootstrap requires valid access and cannot recreate refresh for an 
   const token = 'L'.repeat(43),
     csrf = 'C'.repeat(43);
   await f.store.createSession(
-    { issuer: 'https://oauth.telegram.org', subject: 'legacy', displayName: 'Legacy' },
+    { issuer: 'https://login.yandex.ru', subject: 'legacy', displayName: 'Legacy' },
     tokenHash(token),
     csrf,
     new Date(Date.now() + 60000),
@@ -488,7 +484,7 @@ test('legacy bootstrap requires valid access and cannot recreate refresh for an 
   );
   const expired = 'E'.repeat(43);
   await f.store.createSession(
-    { issuer: 'https://oauth.telegram.org', subject: 'expired', displayName: 'Expired' },
+    { issuer: 'https://login.yandex.ru', subject: 'expired', displayName: 'Expired' },
     tokenHash(expired),
     csrf,
     new Date(0),
@@ -546,7 +542,7 @@ test('login limits are independent for clients behind the ordered production pro
   const client = (ip: string, prefix = '') =>
     f.app.inject({
       method: 'GET',
-      url: '/v1/auth/telegram/start',
+      url: '/v1/auth/yandex/start',
       remoteAddress: '172.18.0.5',
       headers: { 'x-forwarded-for': `${prefix}${ip}, 172.18.0.6` },
     });
@@ -567,7 +563,7 @@ test('direct requests and an untrusted intermediate cannot spoof forwarded clien
   for (let attempt = 0; attempt < 21; attempt++) {
     const response = await f.app.inject({
       method: 'GET',
-      url: '/v1/auth/telegram/start',
+      url: '/v1/auth/yandex/start',
       remoteAddress: '203.0.113.8',
       headers: {
         'x-forwarded-for': `198.51.100.${attempt}, 172.18.0.6`,

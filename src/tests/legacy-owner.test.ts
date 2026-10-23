@@ -28,13 +28,31 @@ test('reviewed legacy adoption is explicit, atomic, database-bound and safe to r
       'INSERT INTO auth_users (id,issuer,subject,display_name) VALUES ($1,$2,$3,$4),($5,$2,$6,$7)',
       [
         ownerId,
-        'https://oauth.telegram.org',
+        'https://login.yandex.ru',
         'verified-owner',
         'Owner',
         otherId,
         'verified-other',
         'Other',
       ],
+    );
+    const telegramId = randomUUID();
+    await pool.query(
+      'INSERT INTO auth_users (id,issuer,subject,display_name) VALUES ($1,$2,$3,$4)',
+      [telegramId, 'https://oauth.telegram.org', 'verified-owner', 'Owner'],
+    );
+    await assert.rejects(
+      prepareLegacyOwner(pool, databaseUrl, telegramId),
+      /https:\/\/login.yandex.ru/,
+    );
+    assert.equal(
+      (
+        await pool.query('SELECT count(*)::int AS n FROM auth_users WHERE subject=$1', [
+          'verified-owner',
+        ])
+      ).rows[0].n,
+      2,
+      'same subject across providers remains distinct',
     );
     await assert.rejects(
       prepareLegacyOwner(pool, databaseUrl, randomUUID()),

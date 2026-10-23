@@ -9,9 +9,9 @@ const [action = 'up', destination] = process.argv.slice(2);
 const compose = [
   'compose',
   '--env-file',
-  '.env.telegram.compose.local',
+  '.env.yandex.compose.local',
   '-f',
-  'docker-compose.telegram.yml',
+  'docker-compose.yandex.yml',
 ];
 function run(args, options = {}) {
   const result = spawnSync('docker', args, { stdio: 'inherit', ...options });
@@ -20,7 +20,7 @@ function run(args, options = {}) {
   return result;
 }
 if (action === 'up') {
-  const env = parse(readFileSync('.env.telegram.runtime.local'));
+  const env = parse(readFileSync('.env.yandex.runtime.local'));
   const database = new URL(env.DATABASE_URL);
   if (
     !['127.0.0.1', 'localhost', '[::1]'].includes(database.hostname) ||
@@ -29,7 +29,7 @@ if (action === 'up') {
     env.MINIO_PORT !== '46642' ||
     env.PORT !== '46543' ||
     env.PWA_ORIGIN !== 'http://127.0.0.1:46544' ||
-    env.TELEGRAM_REDIRECT_URI !== 'http://127.0.0.1:46544/v1/auth/telegram/callback'
+    env.YANDEX_REDIRECT_URI !== 'http://127.0.0.1:46544/v1/auth/yandex/callback'
   ) {
     throw new Error(
       'Local stack requires API 46543, PWA/callback 127.0.0.1:46544, PostgreSQL 46641, MinIO 46642',
@@ -44,17 +44,17 @@ if (action === 'up') {
   database.port = '5432';
   env.COMPOSE_DATABASE_URL = database.toString();
   writeFileSync(
-    '.env.telegram.compose.local',
+    '.env.yandex.compose.local',
     Object.entries(env)
       .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
       .join('\n') + '\n',
     { mode: 0o600 },
   );
-  chmodSync('.env.telegram.compose.local', 0o600);
-  for (const volume of ['setlist-telegram-pgdata', 'setlist-telegram-miniadata'])
+  chmodSync('.env.yandex.compose.local', 0o600);
+  for (const volume of ['setlist-yandex-pgdata', 'setlist-yandex-miniadata'])
     run(['volume', 'create', volume]);
   run([...compose, 'up', '-d', '--build', '--wait', '--wait-timeout', '180']);
-  console.log('Open http://127.0.0.1:46544 (Telegram callback origin).');
+  console.log('Open http://127.0.0.1:46544 (Yandex callback origin).');
 } else if (action === 'stop') {
   run([...compose, 'stop']);
 } else if (action === 'backup') {
@@ -98,5 +98,5 @@ if (action === 'up') {
     run([...compose, 'start', 'api']);
   }
 } else {
-  throw new Error('Usage: local-telegram-stack.mjs up|stop|backup [new-backup-directory]');
+  throw new Error('Usage: local-yandex-stack.mjs up|stop|backup [new-backup-directory]');
 }

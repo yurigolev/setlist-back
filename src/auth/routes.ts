@@ -1,9 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
+import { YandexOAuthError } from './yandex.js';
 import { ApiError } from '../errors.js';
-import { TelegramOidcError } from './oidc.js';
-import type { AuthConfig, AuthSession, AuthStore, TelegramOidc } from './types.js';
+import type { AuthConfig, AuthSession, AuthStore, YandexOAuth } from './types.js';
 
 export const SESSION_COOKIE = 'setlist_session';
 export const REFRESH_COOKIE = 'setlist_refresh';
@@ -49,9 +49,9 @@ export function safeReturnTo(value: unknown): string {
 }
 export async function registerAuthRoutes(
   app: FastifyInstance,
-  dependencies: { config: AuthConfig; store: AuthStore; oidc: TelegramOidc },
+  dependencies: { config: AuthConfig; store: AuthStore; provider: YandexOAuth },
 ) {
-  const { config, store, oidc } = dependencies;
+  const { config, store, provider } = dependencies;
   await app.register(cookie);
   await app.register(async (authRoutes) => {
     const options = {
@@ -81,14 +81,14 @@ export async function registerAuthRoutes(
     };
     const enabled = () => {
       if (!config.enabled)
-        throw new ApiError(503, 'AUTH_NOT_CONFIGURED', 'Telegram authentication is not configured');
+        throw new ApiError(503, 'AUTH_NOT_CONFIGURED', 'Yandex authentication is not configured');
     };
     // Covers errors as well as success responses, including failed callback attempts.
     authRoutes.addHook('onRequest', async (_request, reply) => {
       reply.header('cache-control', 'no-store').header('pragma', 'no-cache');
     });
     const attemptsByIp = new Map<string, { count: number; resetAt: number }>();
-    authRoutes.get('/v1/auth/telegram/start', async (request, reply) => {
+    authRoutes.get('/v1/auth/yandex/start', async (request, reply) => {
       if (!config.enabled)
         return reply.redirect(new URL('/login?authError=unavailable', config.pwaOrigin).toString());
       const now = Date.now();
@@ -114,9 +114,9 @@ export async function registerAuthRoutes(
         expiresAt: new Date(Date.now() + 10 * 60_000),
       });
       reply.setCookie(LOGIN_COOKIE, browser, { ...options, maxAge: 600 });
-      return reply.redirect(oidc.authorizationUrl(state, verifier, nonce));
+      return reply.redirect(provider.authorizationUrl(state, verifier));
     });
-    authRoutes.get('/v1/auth/telegram/callback', async (request, reply) => {
+    authRoutes.get('/v1/auth/yandex/callback', async (request, reply) => {
       try {
         enabled();
         const query = request.query as Record<string, unknown>;
@@ -135,25 +135,20 @@ export async function registerAuthRoutes(
           throw new ApiError(400, 'AUTH_CALLBACK_INVALID', 'Login attempt invalid or expired');
         let identity;
         try {
-          identity = await oidc.authenticate(query.code, attempt.verifier, attempt.nonce);
+          identity = await provider.authenticate(query.code, attempt.verifier);
         } catch (error) {
-          const failure = error instanceof TelegramOidcError ? error : undefined;
+          const failure = error instanceof YandexOAuthError ? error : undefined;
           request.log.warn(
             {
-              telegramAuth: failure?.diagnostic ?? {
-                stage: 'authentication',
-                reason: 'unexpected',
-              },
+              yandexAuth: failure?.diagnostic ?? { stage: 'authentication', reason: 'unexpected' },
             },
-            'Telegram authentication failed',
+            'Yandex authentication failed',
           );
-          if (!failure || failure.category === 'unavailable')
-            throw new ApiError(
-              503,
-              'TELEGRAM_AUTH_UNAVAILABLE',
-              'Telegram authentication unavailable',
-            );
-          throw new ApiError(401, 'TELEGRAM_AUTH_INVALID', 'Telegram authentication failed');
+          throw new ApiError(
+            failure?.category === 'invalid' ? 401 : 503,
+            'YANDEX_AUTH_INVALID',
+            'Yandex authentication failed',
+          );
         }
         const token = randomToken(),
           csrfToken = randomToken(),

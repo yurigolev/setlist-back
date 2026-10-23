@@ -48,7 +48,7 @@ test('PostgreSQL refresh: upgrade existing sessions, concurrent rotation, slidin
       expiry = new Date(Date.now() + 60000);
     await pool.query(
       'INSERT INTO auth_users (id,issuer,subject,display_name) VALUES ($1,$2,$3,$4)',
-      [userId, 'https://oauth.telegram.org', 'legacy', 'Legacy'],
+      [userId, 'https://login.yandex.ru', 'legacy', 'Legacy'],
     );
     await pool.query(
       'INSERT INTO auth_sessions (token_hash,user_id,csrf_token,expires_at) VALUES ($1,$2,$3,$4)',
@@ -122,7 +122,7 @@ test('PostgreSQL refresh: upgrade existing sessions, concurrent rotation, slidin
     const access = token(),
       refresh = token();
     await store.createSession(
-      { issuer: 'https://oauth.telegram.org', subject: 'second', displayName: 'Second' },
+      { issuer: 'https://login.yandex.ru', subject: 'second', displayName: 'Second' },
       tokenHash(access),
       csrf,
       new Date(Date.now() + 60000),
@@ -141,7 +141,7 @@ test('PostgreSQL refresh: upgrade existing sessions, concurrent rotation, slidin
     const third = token(),
       thirdRefresh = token();
     await store.createSession(
-      { issuer: 'https://oauth.telegram.org', subject: 'third', displayName: 'Third' },
+      { issuer: 'https://login.yandex.ru', subject: 'third', displayName: 'Third' },
       tokenHash(third),
       csrf,
       new Date(Date.now() + 60000),

@@ -81,13 +81,13 @@ const env = {
   MINIO_ACCESS_KEY: 'qa_minio',
   MINIO_SECRET_KEY: minioPassword,
   MINIO_BUCKET: `setlist-qa-release-${suffix}`,
-  TELEGRAM_CLIENT_ID: 'release-rehearsal',
-  TELEGRAM_CLIENT_SECRET: randomBytes(24).toString('hex'),
-  TELEGRAM_REDIRECT_URI: `${origin}/v1/auth/telegram/callback`,
+  YANDEX_CLIENT_ID: 'release-rehearsal',
+  YANDEX_CLIENT_SECRET: randomBytes(24).toString('hex'),
+  YANDEX_REDIRECT_URI: `${origin}/v1/auth/yandex/callback`,
   AUTH_ALLOW_INSECURE_LOCAL_HTTP: 'true',
 };
-delete env.LEGACY_OWNER_TELEGRAM_ISSUER;
-delete env.LEGACY_OWNER_TELEGRAM_SUB;
+delete env.LEGACY_OWNER_YANDEX_ISSUER;
+delete env.LEGACY_OWNER_YANDEX_SUB;
 const compose = [
   'compose',
   '--env-file',

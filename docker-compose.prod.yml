@@ -44,15 +44,17 @@ services:
     environment:
       PORT: 3000
       NODE_ENV: production
-      NODE_USE_ENV_PROXY: '1'
-      HTTPS_PROXY: ${TELEGRAM_HTTPS_PROXY_URL:-}
-      NO_PROXY: localhost,127.0.0.1,::1,postgres,minio,api,frontend,caddy
       TRUSTED_PROXY_CHAIN: ${TRUSTED_PROXY_CHAIN:-frontend,caddy}
       DATABASE_URL: postgres://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
       PWA_ORIGIN: ${PWA_ORIGIN:?}
-      TELEGRAM_CLIENT_ID: ${TELEGRAM_CLIENT_ID:?Set the production Telegram client ID}
-      TELEGRAM_CLIENT_SECRET: ${TELEGRAM_CLIENT_SECRET:?Set the production Telegram client secret}
-      TELEGRAM_REDIRECT_URI: ${TELEGRAM_REDIRECT_URI:?Set the registered production callback URL}
+      YANDEX_CLIENT_ID: ${YANDEX_CLIENT_ID:?Set the production Yandex client ID}
+      YANDEX_CLIENT_SECRET: ${YANDEX_CLIENT_SECRET:?Set the production Yandex client secret}
+      YANDEX_REDIRECT_URI: ${YANDEX_REDIRECT_URI:?Set the registered production callback URL}
+      # Temporary rollback bridge: the previous image also runs backup commands.
+      # Yandex ignores these; retain existing private values during the rollout.
+      TELEGRAM_CLIENT_ID: ${TELEGRAM_CLIENT_ID:-}
+      TELEGRAM_CLIENT_SECRET: ${TELEGRAM_CLIENT_SECRET:-}
+      TELEGRAM_REDIRECT_URI: ${TELEGRAM_REDIRECT_URI:-}
       AUTH_ALLOW_INSECURE_LOCAL_HTTP: 'false'
       AUTH_SESSION_TTL_SECONDS: ${AUTH_SESSION_TTL_SECONDS:-900}
       AUTH_REFRESH_TTL_SECONDS: ${AUTH_REFRESH_TTL_SECONDS:-7776000}

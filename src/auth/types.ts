@@ -70,7 +70,7 @@ export interface AuthStore {
   bootstrapSession(hash: string, pair: TokenPair): Promise<RotationResult>;
   revokeRefresh(hash: string): Promise<void>;
 }
-export interface TelegramOidc {
-  authorizationUrl(state: string, verifier: string, nonce: string): string;
-  authenticate(code: string, verifier: string, nonce: string): Promise<VerifiedIdentity>;
+export interface YandexOAuth {
+  authorizationUrl(state: string, verifier: string): string;
+  authenticate(code: string, verifier: string): Promise<VerifiedIdentity>;
 }

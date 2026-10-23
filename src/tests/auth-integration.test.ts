@@ -8,13 +8,13 @@ import pg from 'pg';
 import type { FastifyInstance } from 'fastify';
 import { PgAuthStore } from '../auth/store.js';
 import { SESSION_COOKIE, tokenHash } from '../auth/routes.js';
-import type { AuthConfig, TelegramOidc } from '../auth/types.js';
+import type { AuthConfig, YandexOAuth } from '../auth/types.js';
 import { LIBRARY_ID } from '../db/schema.js';
 
 const databaseUrl = process.env.AUTH_QA_DATABASE_URL;
 const minioPort = Number(process.env.AUTH_QA_MINIO_PORT);
 const minioBucket = process.env.AUTH_QA_BUCKET ?? 'setlist-qa-files';
-const issuer = 'https://oauth.telegram.org';
+const issuer = 'https://login.yandex.ru';
 const headerText = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value.join(' ') : (value ?? '');
 
@@ -182,11 +182,11 @@ test(
     process.env.PWA_ORIGIN = qaPwaOrigin;
     process.env.PORT = String(qaApiPort);
     process.env.AUTH_ALLOW_INSECURE_LOCAL_HTTP = 'true';
-    process.env.TELEGRAM_CLIENT_ID = 'qa-integration-client';
-    process.env.TELEGRAM_CLIENT_SECRET = 'qa-unused-here';
-    process.env.TELEGRAM_REDIRECT_URI = `http://127.0.0.1:${qaApiPort}/v1/auth/telegram/callback`;
-    process.env.LEGACY_OWNER_TELEGRAM_ISSUER = issuer;
-    process.env.LEGACY_OWNER_TELEGRAM_SUB = 'legacy-owner-subject';
+    process.env.YANDEX_CLIENT_ID = 'qa-integration-client';
+    process.env.YANDEX_CLIENT_SECRET = 'qa-unused-here';
+    process.env.YANDEX_REDIRECT_URI = `http://127.0.0.1:${qaApiPort}/v1/auth/yandex/callback`;
+    process.env.LEGACY_OWNER_YANDEX_ISSUER = issuer;
+    process.env.LEGACY_OWNER_YANDEX_SUB = 'legacy-owner-subject';
     process.env.MINIO_ENDPOINT = '127.0.0.1';
     process.env.MINIO_PORT = String(minioPort);
     process.env.MINIO_USE_SSL = 'false';
@@ -199,7 +199,7 @@ test(
       enabled: true,
       clientId: 'qa-integration-client',
       clientSecret: 'qa-unused-here',
-      redirectUri: `http://127.0.0.1:${qaApiPort}/v1/auth/telegram/callback`,
+      redirectUri: `http://127.0.0.1:${qaApiPort}/v1/auth/yandex/callback`,
       pwaOrigin: qaPwaOrigin,
       secureCookies: false,
       sessionTtlSeconds: 60,
@@ -209,16 +209,16 @@ test(
     const { pool: actualAppPool } = await import('../db/client.js');
     appPool = actualAppPool;
     const store = new PgAuthStore(actualAppPool);
-    const oidc: TelegramOidc = {
+    const provider: YandexOAuth = {
       authorizationUrl: (state) =>
-        `https://oidc.qa.invalid/authorize?state=${encodeURIComponent(state)}`,
+        `https://provider.qa.invalid/authorize?state=${encodeURIComponent(state)}`,
       async authenticate() {
         return { issuer, subject: 'legacy-owner-subject', displayName: 'Legacy Owner' };
       },
     };
     const { buildApp } = await import('../app.js');
     const instance = await buildApp({
-      auth: { config: authConfig, store, oidc },
+      auth: { config: authConfig, store, provider },
       initializeStorage: false,
     });
     app = instance;
@@ -289,7 +289,7 @@ test(
     const outsiderToken = randomBytes(32).toString('base64url');
     const outsiderCsrf = randomBytes(32).toString('base64url');
     await store.createSession(
-      { issuer, subject: 'unrelated-telegram-subject', displayName: 'Outsider' },
+      { issuer, subject: 'unrelated-yandex-subject', displayName: 'Outsider' },
       tokenHash(outsiderToken),
       outsiderCsrf,
       new Date(Date.now() + 60_000),

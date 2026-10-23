@@ -1,16 +1,16 @@
-import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from 'jose';
+import { randomBytes } from 'node:crypto';
 import { buildApp } from '../src/app.js';
 import { config } from '../src/config.js';
 import { pool } from '../src/db/client.js';
 import { PgAuthStore } from '../src/auth/store.js';
-import { createTelegramOidc, TELEGRAM_ISSUER } from '../src/auth/oidc.js';
-import type { TelegramOidc } from '../src/auth/types.js';
+import { createYandexOAuth, YANDEX_ISSUER } from '../src/auth/yandex.js';
+import type { YandexOAuth } from '../src/auth/types.js';
 
 const port = Number(process.env.AUTH_QA_API_PORT);
 const databaseUrl = process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL) : undefined;
 const pwaUrl = process.env.PWA_ORIGIN ? new URL(process.env.PWA_ORIGIN) : undefined;
-const redirectUrl = process.env.TELEGRAM_REDIRECT_URI
-  ? new URL(process.env.TELEGRAM_REDIRECT_URI)
+const redirectUrl = process.env.YANDEX_REDIRECT_URI
+  ? new URL(process.env.YANDEX_REDIRECT_URI)
   : undefined;
 const qaProject = process.env.AUTH_QA_PROJECT_NAME ?? '';
 const qaDatabaseName = process.env.AUTH_QA_DATABASE_NAME ?? '';
@@ -46,11 +46,11 @@ const sameOriginPwaCallback = redirectUrl?.origin === pwaUrl?.origin;
 if (
   !isLocal(redirectUrl) ||
   (!apiCallback && !sameOriginPwaCallback) ||
-  redirectUrl?.pathname !== '/v1/auth/telegram/callback' ||
+  redirectUrl?.pathname !== '/v1/auth/yandex/callback' ||
   redirectUrl?.search ||
   redirectUrl?.hash
 )
-  throw new Error('TELEGRAM_REDIRECT_URI must use the explicit QA API or same-origin PWA callback');
+  throw new Error('YANDEX_REDIRECT_URI must use the explicit QA API or same-origin PWA callback');
 if (
   !isLocal(
     process.env.MINIO_ENDPOINT ? new URL(`http://${process.env.MINIO_ENDPOINT}`) : undefined,
@@ -61,12 +61,7 @@ if (
 )
   throw new Error('MinIO must use the explicit isolated QA endpoint, port, and bucket');
 
-const { publicKey, privateKey } = await generateKeyPair('RS256');
-const publicJwk = await exportJWK(publicKey);
-const keys = createLocalJWKSet({
-  keys: [{ ...publicJwk, kid: 'qa-local-key', alg: 'RS256', use: 'sig' }],
-});
-const grants = new Map<string, { verifier: string; nonce: string }>();
+const grants = new Map<string, { verifier: string }>();
 const qaUsers = {
   'qa-owner': { subject: config.auth.legacyOwnerSub ?? '', displayName: 'QA Owner' },
   'qa-outsider': { subject: 'qa-outsider-subject', displayName: 'QA Outsider' },
@@ -75,54 +70,66 @@ const qaUsers = {
 };
 const codes = Object.keys(qaUsers);
 
-const realOidc = createTelegramOidc(config.auth, {
-  keys,
+const tokens = new Map<string, keyof typeof qaUsers>();
+const realProvider = createYandexOAuth(config.auth, {
   fetch: async (input, init) => {
-    if (String(input) !== `${TELEGRAM_ISSUER}/token` || init?.method !== 'POST')
-      return new Response('Not found', { status: 404 });
-    const body = new URLSearchParams(String(init.body ?? ''));
-    const code = body.get('code') ?? '';
-    const grant = grants.get(code);
-    if (!grant || body.get('code_verifier') !== grant.verifier)
-      return Response.json({ error: 'invalid_grant' }, { status: 400 });
-    grants.delete(code);
-    const user = qaUsers[code as keyof typeof qaUsers];
-    if (!user?.subject)
-      return Response.json({ error: 'QA identity fixture missing' }, { status: 500 });
-    const id_token = await new SignJWT({
-      nonce: grant.nonce,
-      name: user.displayName,
-      preferred_username: code,
-      picture: 'https://example.invalid/qa-avatar.png',
-    })
-      .setProtectedHeader({ alg: 'RS256', kid: 'qa-local-key' })
-      .setIssuer(TELEGRAM_ISSUER)
-      .setSubject(user.subject)
-      .setAudience(config.auth.clientId)
-      .setIssuedAt()
-      .setExpirationTime('5m')
-      .sign(privateKey);
-    return Response.json({ id_token });
+    const headers = new Headers(init?.headers);
+    if (String(input) === 'https://oauth.yandex.ru/token' && init?.method === 'POST') {
+      const body = new URLSearchParams(String(init.body ?? ''));
+      const expectedAuthorization = `Basic ${Buffer.from(`${config.auth.clientId}:${config.auth.clientSecret}`).toString('base64')}`;
+      if (headers.get('authorization') !== expectedAuthorization)
+        return Response.json({ error: 'invalid_client' }, { status: 401 });
+      const code = body.get('code') ?? '';
+      const grant = grants.get(code);
+      if (
+        !grant ||
+        body.get('code_verifier') !== grant.verifier ||
+        body.get('grant_type') !== 'authorization_code' ||
+        body.get('redirect_uri') !== config.auth.redirectUri
+      )
+        return Response.json({ error: 'invalid_grant' }, { status: 400 });
+      grants.delete(code);
+      const user = qaUsers[code as keyof typeof qaUsers];
+      if (!user?.subject)
+        return Response.json({ error: 'QA identity fixture missing' }, { status: 500 });
+      const accessToken = randomBytes(32).toString('hex');
+      tokens.set(accessToken, code as keyof typeof qaUsers);
+      return Response.json({ access_token: accessToken, token_type: 'bearer' });
+    }
+    if (String(input) === `${YANDEX_ISSUER}/info?format=json` && init?.method === 'GET') {
+      const authorization = headers.get('authorization') ?? '';
+      const accessToken = authorization.startsWith('OAuth ') ? authorization.slice(6) : '';
+      const code = tokens.get(accessToken);
+      if (!code) return Response.json({ error: 'invalid_token' }, { status: 401 });
+      tokens.delete(accessToken);
+      const user = qaUsers[code];
+      return Response.json({
+        id: user.subject,
+        client_id: config.auth.clientId,
+        display_name: user.displayName,
+        login: code,
+      });
+    }
+    return new Response('Not found', { status: 404 });
   },
 });
 
-// This mock records the verifier/nonce a provider binds to each authorization code.
-// The production createTelegramOidc implementation still performs token exchange
-// and RS256 issuer/audience/time/nonce/signature verification.
-const oidc: TelegramOidc = {
-  authorizationUrl(state, verifier, nonce) {
-    for (const code of codes) grants.set(code, { verifier, nonce });
-    const authorization = realOidc.authorizationUrl(state, verifier, nonce);
+// This QA-only provider binds and consumes authorization codes and access tokens.
+// The production adapter performs the real PKCE token exchange and profile validation.
+const provider: YandexOAuth = {
+  authorizationUrl(state, verifier) {
+    for (const code of codes) grants.set(code, { verifier });
+    const authorization = realProvider.authorizationUrl(state, verifier);
     if (process.env.AUTH_QA_BROWSER_LOGIN !== 'true') return authorization;
     const local = new URL('/v1/auth/qa/authorize', pwaUrl);
     local.search = new URL(authorization).search;
     return local.href;
   },
-  authenticate: (code, verifier, nonce) => realOidc.authenticate(code, verifier, nonce),
+  authenticate: (code, verifier) => realProvider.authenticate(code, verifier),
 };
 
 const app = await buildApp({
-  auth: { config: config.auth, store: new PgAuthStore(pool), oidc },
+  auth: { config: config.auth, store: new PgAuthStore(pool), provider },
   initializeStorage: true,
 });
 
@@ -159,7 +166,7 @@ if (process.env.AUTH_QA_BROWSER_LOGIN === 'true') {
         )
         .type('text/html')
         .send(
-          `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Локальный тестовый вход</title><style>body{background:#171d26;color:#fff;font:18px system-ui;max-width:480px;margin:12vh auto;padding:24px}a{display:block;padding:20px;margin:16px 0;background:#334155;color:#fff;border-radius:12px;text-decoration:none}p{color:#cbd5e1}</style><h1>Тестовый вход</h1><p>Локальная QA-среда. Настоящий Telegram не используется.</p>${options}</html>`,
+          `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Локальный тестовый вход</title><style>body{background:#171d26;color:#fff;font:18px system-ui;max-width:480px;margin:12vh auto;padding:24px}a{display:block;padding:20px;margin:16px 0;background:#334155;color:#fff;border-radius:12px;text-decoration:none}p{color:#cbd5e1}</style><h1>Тестовый вход</h1><p>Локальная QA-среда. Настоящий Yandex не используется.</p>${options}</html>`,
         );
     },
   );

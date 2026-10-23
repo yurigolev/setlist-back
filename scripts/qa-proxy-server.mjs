@@ -22,14 +22,14 @@ await registerAuthRoutes(app, {
     enabled: true,
     clientId: 'proxy-qa',
     clientSecret: 'synthetic-proxy-qa',
-    redirectUri: 'https://setlivo.example.invalid/v1/auth/telegram/callback',
+    redirectUri: 'https://setlivo.example.invalid/v1/auth/yandex/callback',
     pwaOrigin: 'https://setlivo.example.invalid',
     secureCookies: true,
     sessionTtlSeconds: 900,
   },
   store: { async createLogin() {} },
-  oidc: { authorizationUrl: () => 'https://telegram.example.invalid/auth' },
+  provider: { authorizationUrl: () => 'https://yandex.example.invalid/auth' },
 });
-// Only start/inspection are used. No Telegram, DB, MinIO, credentials or fake-login endpoint.
+// Only start/inspection are used. No Yandex, DB, MinIO, credentials or fake-login endpoint.
 await app.listen({ host: '0.0.0.0', port: 3000 });
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => void app.close());

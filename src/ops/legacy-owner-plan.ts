@@ -6,7 +6,7 @@ import { LIBRARY_ID } from '../db/schema.js';
 
 const ownerSchema = z.strictObject({
   id: z.uuid(),
-  issuer: z.literal('https://oauth.telegram.org'),
+  issuer: z.literal('https://login.yandex.ru'),
   subject: z.string().min(1),
   displayName: z.string(),
 });

@@ -70,6 +70,6 @@ Every backend deployment also takes a consistent backup before running migration
 
 ## Persistent authorization rollout
 
-For the first Telegram/setlist rollout, follow [SAFE_RELEASE.md](SAFE_RELEASE.md): production Telegram credentials, a rehearsal from one complete backup, and explicit plan/apply adoption of the legacy library are required. Install the updated Compose and deploy script separately before releasing images; the existing image deployment does not copy those files. Healthchecks alone do not confirm owner access.
+For the Yandex replacement rollout, follow [SAFE_RELEASE.md](SAFE_RELEASE.md): production Yandex credentials, a rehearsal from one complete backup, and explicit plan/apply adoption of the legacy library are required. Install the updated Compose and deploy script separately before releasing images; the existing image deployment does not copy those files. Healthchecks alone do not confirm owner access.
 
 Migration `0007_refresh_sessions.sql` adds refresh families and hash history, with nullable family links for existing access sessions. Deploy the migrated backend before the matching client. Set `AUTH_SESSION_TTL_SECONDS=900` and `AUTH_REFRESH_TTL_SECONDS=7776000`; existing environment values override defaults. Access lasts 15 minutes, refresh renews for 90 days after successful rotation. Existing legacy cookie expiries remain unchanged and can bootstrap a family while valid. A rollback can retain the additive tables, but the previous backend cannot renew refresh sessions.

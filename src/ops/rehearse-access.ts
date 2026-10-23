@@ -27,7 +27,7 @@ try {
       'INSERT INTO auth_users (id,issuer,subject,display_name) VALUES ($1,$2,$3,$4)',
       [
         userId,
-        'https://oauth.telegram.org',
+        'https://login.yandex.ru',
         `release-qa-${randomUUID()}`,
         'Synthetic release QA owner',
       ],
@@ -78,7 +78,7 @@ try {
   const outsiderToken = randomBytes(32).toString('base64url');
   await pool.query('INSERT INTO auth_users (id,issuer,subject,display_name) VALUES ($1,$2,$3,$4)', [
     outsiderId,
-    'https://oauth.telegram.org',
+    'https://login.yandex.ru',
     `release-qa-${randomUUID()}`,
     'Synthetic release QA outsider',
   ]);

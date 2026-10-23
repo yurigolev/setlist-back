@@ -40,7 +40,7 @@ async function anonymous(path, init = {}) {
 }
 
 async function login(code) {
-  const start = await anonymous('/v1/auth/telegram/start?returnTo=%2F');
+  const start = await anonymous('/v1/auth/yandex/start?returnTo=%2F');
   expectStatus(start, 302, 'mock login start');
   const loginCookie = start.headers
     .getSetCookie()
@@ -49,7 +49,7 @@ async function login(code) {
   const state = new URL(start.headers.get('location')).searchParams.get('state');
   assert.ok(loginCookie && state, 'mock login binding must be present');
   const callback = await anonymous(
-    `/v1/auth/telegram/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`,
+    `/v1/auth/yandex/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`,
     { headers: { cookie: loginCookie } },
   );
   expectStatus(callback, 302, 'mock login callback');
