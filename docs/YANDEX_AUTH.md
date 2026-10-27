@@ -6,7 +6,9 @@ The provider access token is neither sent to the browser nor stored. The API cre
 
 ## Persistent local Yandex stack
 
-Configure ignored `.env.yandex.runtime.local` with the variables in `.env.example`, local PostgreSQL/MinIO credentials and server-only `YANDEX_CLIENT_ID` / `YANDEX_CLIENT_SECRET`. Register the exact callback `http://127.0.0.1:46544/v1/auth/yandex/callback` in the Yandex web application and grant only `login:info`.
+Configure ignored `.env.yandex.runtime.local` with the variables in `.env.example`, local PostgreSQL/MinIO credentials and server-only `YANDEX_CLIENT_ID` / `YANDEX_CLIENT_SECRET`. Register the exact callback `http://127.0.0.1:46544/v1/auth/yandex/callback` in the Yandex web application and grant `login:info` and `login:avatar` (user profile picture).
+
+The API maps a nonempty Yandex `default_avatar_id` to a public `https://avatars.yandex.net/get-yapic/<id>/islands-200` URL in the session user's `picture`. Missing or placeholder portraits keep the initials fallback. After enabling portrait access and updating the API, sign out and sign in through Yandex again: existing sessions and refreshes do not fetch a new provider profile.
 
 Local endpoints: PWA `127.0.0.1:46544`, API `127.0.0.1:46543`, PostgreSQL `127.0.0.1:46641`, MinIO `127.0.0.1:46642`. Use `PWA_ORIGIN=http://127.0.0.1:46544`, that exact callback, and `AUTH_ALLOW_INSECURE_LOCAL_HTTP=true`. Never reuse these insecure cookie settings for production.
 

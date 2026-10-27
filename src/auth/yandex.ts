@@ -143,7 +143,7 @@ export function createYandexOAuth(
         client_id: config.clientId,
         redirect_uri: config.redirectUri,
         response_type: 'code',
-        scope: 'login:info',
+        scope: 'login:info login:avatar',
         state,
         code_challenge: createHash('sha256').update(verifier).digest('base64url'),
         code_challenge_method: 'S256',
@@ -212,12 +212,21 @@ export function createYandexOAuth(
       const text = (value: unknown) =>
         typeof value === 'string' && value.trim() ? value.trim().slice(0, 200) : undefined;
       const username = text(profile.login);
+      const avatarId = profile.default_avatar_id;
+      const picture =
+        profile.is_avatar_empty === false &&
+        typeof avatarId === 'string' &&
+        avatarId.length <= 255 &&
+        /^[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(avatarId)
+          ? `https://avatars.yandex.net/get-yapic/${avatarId}/islands-200`
+          : undefined;
       return {
         issuer: YANDEX_ISSUER,
         subject: profile.id,
         displayName:
           text(profile.display_name) ?? text(profile.real_name) ?? username ?? 'Yandex user',
         ...(username ? { username } : {}),
+        ...(picture ? { picture } : {}),
       };
     },
   };

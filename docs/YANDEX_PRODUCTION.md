@@ -2,7 +2,7 @@
 
 Yandex replaces Telegram authentication. Merge/push to `main` triggers automatic publication/deployment. Install the reviewed configuration and take a fresh consistent backup before merging release PRs.
 
-Register an application for user authorization with web platform and `login:info`. Callback addresses:
+Register an application for user authorization with web platform and `login:info` plus `login:avatar` (user profile picture). Existing users must sign out and sign in again after the API update to populate their picture. Callback addresses:
 
 - `https://setlivo.ru/v1/auth/yandex/callback`
 - `http://127.0.0.1:46544/v1/auth/yandex/callback` for local verification
