@@ -7,13 +7,18 @@ import { attachments, libraries, songs } from '../db/schema.js';
 import { ApiError } from '../errors.js';
 import { scopeId } from '../auth/permissions.js';
 import { removeObject } from '../storage.js';
+import { tagIdsInput, songTagIds, replaceSongTags, listTags, librarySongTagIds } from './tags.js';
 
 const songInput = z.strictObject({
   title: z.string().trim().min(1).max(200),
   artist: z.string().trim().min(1).max(200),
   notes: z.string().max(10000).default(''),
+  tagIds: tagIdsInput.optional(),
 });
-const patchInput = songInput.partial().refine((value) => Object.keys(value).length > 0);
+const patchInput = songInput
+  .partial()
+  .extend({ notes: z.string().max(10000).optional() })
+  .refine((value) => Object.keys(value).length > 0);
 const idParams = z.object({ id: z.string().uuid() });
 
 export function parse<T>(schema: z.ZodType<T>, value: unknown): T {
@@ -39,13 +44,14 @@ export function revision(request: FastifyRequest): number {
   return value;
 }
 
-export function songDto(song: typeof songs.$inferSelect) {
+export function songDto(song: typeof songs.$inferSelect, tagIds: string[] = []) {
   return {
     id: song.id,
     setlistId: song.libraryId,
     title: song.title,
     artist: song.artist,
     notes: song.notes,
+    tagIds,
     revision: song.revision,
     createdAt: song.createdAt.toISOString(),
     updatedAt: song.updatedAt.toISOString(),
@@ -64,14 +70,12 @@ export function registerSongRoutes(
     app.get('/v1/setlists/:setlistId/songs', async (request) =>
       db.transaction(async (tx) => {
         await authorize?.(request, tx);
-        return {
-          songs: (
-            await tx
-              .select()
-              .from(songs)
-              .where(and(eq(songs.libraryId, scopeId(request)), isNull(songs.deletedAt)))
-          ).map(songDto),
-        };
+        const tagIds = await librarySongTagIds(tx, scopeId(request));
+        const rows = await tx
+          .select()
+          .from(songs)
+          .where(and(eq(songs.libraryId, scopeId(request)), isNull(songs.deletedAt)));
+        return { songs: rows.map((song) => songDto(song, tagIds.get(song.id) ?? [])) };
       }),
     );
     app.get('/v1/setlists/:setlistId/songs/:id', async (request) =>
@@ -85,7 +89,7 @@ export function registerSongRoutes(
             and(eq(songs.id, id), eq(songs.libraryId, scopeId(request)), isNull(songs.deletedAt)),
           );
         if (!song) throw new ApiError(404, 'SONG_NOT_FOUND', 'Song not found');
-        return songDto(song);
+        return songDto(song, await songTagIds(tx, scopeId(request), song.id));
       }),
     );
   }
@@ -94,7 +98,11 @@ export function registerSongRoutes(
     const key = request.headers['idempotency-key'];
     if (typeof key !== 'string' || key.length < 1 || key.length > 200)
       throw new ApiError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key is required');
-    const hash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
+    // Empty tags preserve hashes written before tags existed. Nonempty IDs are canonical.
+    const { tagIds = [], ...fields } = body;
+    const hash = createHash('sha256')
+      .update(JSON.stringify(tagIds.length ? { ...fields, tagIds } : fields))
+      .digest('hex');
     const result = await db.transaction(async (tx) => {
       await authorize?.(request, tx);
       await tx.execute(sql`SELECT id FROM libraries WHERE id = ${scopeId(request)} FOR UPDATE`);
@@ -106,14 +114,18 @@ export function registerSongRoutes(
       if (existing) {
         if (existing.createHash !== hash)
           throw new ApiError(409, 'IDEMPOTENCY_CONFLICT', 'Key already used with different data');
-        return { song: existing, replay: true };
+        return {
+          song: existing,
+          tagIds: await songTagIds(tx, scopeId(request), existing.id),
+          replay: true,
+        };
       }
       const [song] = await tx
         .insert(songs)
         .values({
           id: randomUUID(),
           libraryId: scopeId(request),
-          ...body,
+          ...fields,
           createKey: key,
           createHash: hash,
         })
@@ -122,15 +134,17 @@ export function registerSongRoutes(
         .update(libraries)
         .set({ revision: sql`${libraries.revision} + 1`, updatedAt: new Date() })
         .where(eq(libraries.id, scopeId(request)));
-      return { song, replay: false };
+      await replaceSongTags(tx, scopeId(request), song.id, tagIds);
+      return { song, tagIds, replay: false };
     });
     reply.status(result.replay ? 200 : 201);
-    return songDto(result.song);
+    return songDto(result.song, result.tagIds);
   });
 
   app.patch(scoped ? '/v1/setlists/:setlistId/songs/:id' : '/v1/songs/:id', async (request) => {
     const { id } = parse(idParams, request.params);
     const body = parse(patchInput, request.body);
+    const { tagIds, ...fields } = body;
     const expected = revision(request);
     return db.transaction(async (tx) => {
       await authorize?.(request, tx);
@@ -147,14 +161,15 @@ export function registerSongRoutes(
         throw new ApiError(409, 'REVISION_CONFLICT', 'Song revision changed', current.revision);
       const [updated] = await tx
         .update(songs)
-        .set({ ...body, revision: current.revision + 1, updatedAt: new Date() })
+        .set({ ...fields, revision: current.revision + 1, updatedAt: new Date() })
         .where(eq(songs.id, id))
         .returning();
       await tx
         .update(libraries)
         .set({ revision: sql`${libraries.revision} + 1`, updatedAt: new Date() })
         .where(eq(libraries.id, scopeId(request)));
-      return songDto(updated);
+      if (tagIds !== undefined) await replaceSongTags(tx, scopeId(request), id, tagIds);
+      return songDto(updated, await songTagIds(tx, scopeId(request), id));
     });
   });
 
@@ -223,6 +238,7 @@ export function registerSongRoutes(
           ),
         )
         .orderBy(attachments.createdAt, attachments.id);
+      const tagIds = await librarySongTagIds(tx, scopeId(request));
       return {
         ...(scoped
           ? {
@@ -231,8 +247,9 @@ export function registerSongRoutes(
               role: (permission as any)?.role,
             }
           : { libraryId: scopeId(request), libraryRevision: library.revision }),
+        tags: await listTags(tx, scopeId(request)),
         songs: rows.map((song) => ({
-          ...songDto(song),
+          ...songDto(song, tagIds.get(song.id) ?? []),
           attachments: files
             .filter((row) => row.attachment.songId === song.id)
             .map(({ attachment }) => ({

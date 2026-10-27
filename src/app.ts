@@ -1,3 +1,4 @@
+import { registerTagRoutes } from './routes/tags.js';
 import Fastify from 'fastify';
 import { readFile } from 'node:fs/promises';
 import cors from '@fastify/cors';
@@ -78,6 +79,7 @@ export async function buildApp(
     await registerAttachmentRoutes(protectedRoutes, false, authorize);
     await protectedRoutes.register(async (scoped) => {
       registerSongRoutes(scoped, true, authorize);
+      registerTagRoutes(scoped, authorize);
       await registerAttachmentRoutes(scoped, true, authorize);
     });
   });
