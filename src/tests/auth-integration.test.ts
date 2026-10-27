@@ -139,6 +139,8 @@ test(
       '0005_smart_wrecker.sql',
       '0006_indefinite_invites.sql',
       '0007_refresh_sessions.sql',
+      '0008_song_tags.sql',
+      '0009_tag_colors.sql',
     ]) {
       const source = await readFile(`./drizzle/${migration}`, 'utf8');
       for (const statement of source
@@ -326,6 +328,109 @@ test(
       (await pool.query('SELECT id FROM songs WHERE title=$1', ['Outsider write'])).rowCount,
       0,
     );
+
+    // Exercise real tag route registration with outsider, viewer and editor identities.
+    const tagRoot = `/v1/setlists/${LIBRARY_ID}/tags`;
+    const outsiderHeaders = {
+      cookie: outsiderCookie,
+      origin: qaPwaOrigin,
+      'x-csrf-token': outsiderCsrf,
+    };
+    assert.equal(
+      (await instance.inject({ method: 'GET', url: tagRoot, headers: outsiderHeaders })).statusCode,
+      403,
+    );
+    assert.equal(
+      (
+        await instance.inject({
+          method: 'POST',
+          url: tagRoot,
+          headers: outsiderHeaders,
+          payload: { name: 'Denied tag' },
+        })
+      ).statusCode,
+      403,
+    );
+    const outsiderId = (
+      await pool.query('SELECT id FROM auth_users WHERE subject=$1', ['unrelated-yandex-subject'])
+    ).rows[0].id;
+    await pool.query(
+      "INSERT INTO setlist_memberships (setlist_id,user_id,role) VALUES ($1,$2,'viewer')",
+      [LIBRARY_ID, outsiderId],
+    );
+    assert.equal(
+      (await instance.inject({ method: 'GET', url: tagRoot, headers: outsiderHeaders })).statusCode,
+      200,
+    );
+    const ownerTag = await instance.inject({
+      method: 'POST',
+      url: tagRoot,
+      headers: { cookie: ownerCookie, origin: qaPwaOrigin, 'x-csrf-token': ownerCsrf },
+      payload: { name: 'Permissions tag' },
+    });
+    assert.equal(ownerTag.statusCode, 201);
+    const permissionTagId = ownerTag.json().id;
+    for (const method of ['POST', 'PATCH', 'DELETE'] as const) {
+      const response = await instance.inject({
+        method,
+        url: method === 'POST' ? tagRoot : `${tagRoot}/${permissionTagId}`,
+        headers: outsiderHeaders,
+        ...(method === 'DELETE' ? {} : { payload: { name: 'Denied change' } }),
+      });
+      assert.equal(response.statusCode, 403);
+    }
+    const viewerAssign = await instance.inject({
+      method: 'PATCH',
+      url: `/v1/setlists/${LIBRARY_ID}/songs/${songId}`,
+      headers: { ...outsiderHeaders, 'if-match': '3' },
+      payload: { tagIds: [permissionTagId] },
+    });
+    assert.equal(viewerAssign.statusCode, 403);
+    await pool.query(
+      "UPDATE setlist_memberships SET role='editor' WHERE setlist_id=$1 AND user_id=$2",
+      [LIBRARY_ID, outsiderId],
+    );
+    assert.equal(
+      (
+        await instance.inject({
+          method: 'PATCH',
+          url: `${tagRoot}/${permissionTagId}`,
+          headers: outsiderHeaders,
+          payload: { name: 'Editor tag' },
+        })
+      ).statusCode,
+      200,
+    );
+    const editorCreate = await instance.inject({
+      method: 'POST',
+      url: tagRoot,
+      headers: outsiderHeaders,
+      payload: { name: 'Editor created' },
+    });
+    assert.equal(editorCreate.statusCode, 201);
+    assert.equal(
+      (
+        await instance.inject({
+          method: 'DELETE',
+          url: `${tagRoot}/${editorCreate.json().id}`,
+          headers: outsiderHeaders,
+        })
+      ).statusCode,
+      200,
+    );
+    const editorAssign = await instance.inject({
+      method: 'PATCH',
+      url: `/v1/setlists/${LIBRARY_ID}/songs/${songId}`,
+      headers: { ...outsiderHeaders, 'if-match': '3' },
+      payload: { tagIds: [permissionTagId] },
+    });
+    assert.equal(editorAssign.statusCode, 200);
+    assert.deepEqual(editorAssign.json().tagIds, [permissionTagId]);
+    assert.equal(editorAssign.json().notes, 'before auth migration');
+    await pool.query('DELETE FROM setlist_memberships WHERE setlist_id=$1 AND user_id=$2', [
+      LIBRARY_ID,
+      outsiderId,
+    ]);
 
     const write = await instance.inject({
       method: 'POST',

@@ -73,7 +73,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/SongId'
     patch:
-      summary: Update text fields only
+      summary: Update song text and tags
       description: Attachments are rejected and can only be changed through attachment
         operations.
       parameters:
@@ -485,7 +485,7 @@ paths:
         schema: *a5
       - $ref: '#/components/parameters/SongId'
     patch:
-      summary: Update text fields only
+      summary: Update song text and tags
       description: Attachments are rejected and can only be changed through attachment
         operations.
       parameters:
@@ -1143,6 +1143,137 @@ paths:
         '404': *a4
         '409': *a4
         '428': *a4
+  /v1/setlists/{setlistId}/tags:
+    parameters:
+      - &tagSetlistId
+        name: setlistId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: List setlist tags
+      description: All members can read tags.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagList'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+    post:
+      summary: Create setlist tag
+      description: 'Owner/editor only. Advances setlist revision. Names use NFC,
+        trim/collapse whitespace and Russian locale lowercase for uniqueness.
+        Duplicate name: TAG_NAME_CONFLICT (409). Rename uses last-write-wins
+        without If-Match. Deletion also advances revisions of affected active
+        songs.'
+      parameters: &tagCsrf
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Token from GET /v1/auth/session. Exact PWA Origin is also required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagInput'
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tag'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /v1/setlists/{setlistId}/tags/{id}:
+    parameters:
+      - *tagSetlistId
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      summary: Update setlist tag
+      description: 'Owner/editor only. Advances setlist revision. Names use NFC,
+        trim/collapse whitespace and Russian locale lowercase for uniqueness.
+        Duplicate name: TAG_NAME_CONFLICT (409). Rename uses last-write-wins
+        without If-Match. Deletion also advances revisions of affected active
+        songs.'
+      parameters: *tagCsrf
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagPatch'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tag'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+    delete:
+      summary: Delete setlist tag and remove song links
+      description: 'Owner/editor only. Advances setlist revision. Names use NFC,
+        trim/collapse whitespace and Russian locale lowercase for uniqueness.
+        Duplicate name: TAG_NAME_CONFLICT (409). Rename uses last-write-wins
+        without If-Match. Deletion also advances revisions of affected active
+        songs.'
+      parameters: *tagCsrf
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deletion'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
 components:
   parameters:
     SongId:
@@ -1185,6 +1316,60 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    TagColor:
+      type: [string, 'null']
+      pattern: '^#[0-9a-fA-F]{6}$'
+      description: Opaque RGB color, normalized to uppercase. Null removes the color.
+    TagInput:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: NFC normalized; leading/trailing whitespace trimmed, internal
+            whitespace collapsed. 1–40 Unicode characters after normalization.
+        color:
+          $ref: '#/components/schemas/TagColor'
+          description: Omitted or null creates an uncolored tag. No server color generation.
+    TagPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        color:
+          $ref: '#/components/schemas/TagColor'
+          description: Omitted preserves the current color; null clears it.
+    Tag:
+      type: object
+      required:
+        - id
+        - name
+        - color
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        color:
+          $ref: '#/components/schemas/TagColor'
+    TagList:
+      type: object
+      required:
+        - tags
+      properties:
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tag'
     SongInput:
       type: object
       additionalProperties: false
@@ -1192,6 +1377,12 @@ components:
         - title
         - artist
       properties:
+        tagIds:
+          type: array
+          description: Sorted unique tag UUIDs. Creation defaults to empty; foreign/missing IDs return INVALID_TAG_IDS (400).
+          items:
+            type: string
+            format: uuid
         title:
           type: string
           minLength: 1
@@ -1209,6 +1400,12 @@ components:
       additionalProperties: false
       minProperties: 1
       properties:
+        tagIds:
+          type: array
+          description: Omitted preserves links; empty clears. Foreign/missing IDs return INVALID_TAG_IDS (400).
+          items:
+            type: string
+            format: uuid
         title:
           type: string
           minLength: 1
@@ -1224,6 +1421,7 @@ components:
       type: object
       required:
         - id
+        - tagIds
         - title
         - artist
         - notes
@@ -1232,6 +1430,12 @@ components:
         - updatedAt
         - setlistId
       properties:
+        tagIds:
+          type: array
+          description: Sorted unique tag UUIDs. Creation defaults to empty; foreign/missing IDs return INVALID_TAG_IDS (400).
+          items:
+            type: string
+            format: uuid
         id:
           type: string
           format: uuid
@@ -1314,7 +1518,12 @@ components:
         - libraryId
         - libraryRevision
         - songs
+        - tags
       properties:
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tag'
         libraryId:
           type: string
           format: uuid
@@ -1476,7 +1685,12 @@ components:
         - setlistRevision
         - role
         - songs
+        - tags
       properties:
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tag'
         setlistId: *a5
         setlistRevision:
           type: integer

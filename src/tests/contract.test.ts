@@ -18,6 +18,10 @@ test('OpenAPI lists the implemented song, snapshot and attachment contract', asy
     ['/v1/songs/{songId}/attachments', 'post'],
     ['/v1/attachments/{id}', 'delete'],
     ['/v1/attachments/{id}/content', 'get'],
+    ['/v1/setlists/{setlistId}/tags', 'get'],
+    ['/v1/setlists/{setlistId}/tags', 'post'],
+    ['/v1/setlists/{setlistId}/tags/{id}', 'patch'],
+    ['/v1/setlists/{setlistId}/tags/{id}', 'delete'],
     ['/v1/setlists', 'get'],
     ['/v1/setlists', 'post'],
     ['/v1/setlists/{setlistId}', 'patch'],
@@ -34,6 +38,10 @@ test('OpenAPI lists the implemented song, snapshot and attachment contract', asy
     ['/v1/invitations/accept', 'post'],
   ])
     assert.ok(contract.paths[path][method], `${method} ${path}`);
+  assert.ok(contract.components.schemas.Song.required.includes('tagIds'));
+  assert.ok(contract.components.schemas.Snapshot.required.includes('tags'));
+  assert.ok(contract.components.schemas.SetlistSnapshot.required.includes('tags'));
+  assert.equal(contract.components.schemas.SongInput.properties.tagIds.items.format, 'uuid');
   assert.equal(contract.components.schemas.SongInput.additionalProperties, false);
   assert.equal(contract.components.schemas.SongPatch.additionalProperties, false);
   assert.ok(

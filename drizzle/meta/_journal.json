@@ -57,6 +57,20 @@
       "when": 1791816146116,
       "tag": "0007_refresh_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793035041790,
+      "tag": "0008_song_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793040517358,
+      "tag": "0009_tag_colors",
+      "breakpoints": true
     }
   ]
 }

@@ -1,3 +1,5 @@
+import { songTags, tags } from '../db/schema.js';
+import { songTagIds } from './tags.js';
 import { CopyConditions } from 'minio';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -291,6 +293,31 @@ export function registerSetlistRoutes(app: FastifyInstance, auth: AuthConfig) {
             createHash: tokenHash(id),
           })
           .returning();
+        const sourceTags = await tx
+          .select({ tag: tags })
+          .from(songTags)
+          .innerJoin(tags, and(eq(tags.id, songTags.tagId), eq(tags.libraryId, songTags.libraryId)))
+          .where(and(eq(songTags.libraryId, sourceId), eq(songTags.songId, songId)));
+        for (const { tag } of sourceTags) {
+          const [existingTag] = await tx
+            .select()
+            .from(tags)
+            .where(
+              and(eq(tags.libraryId, targetSetlistId), eq(tags.normalizedName, tag.normalizedName)),
+            );
+          const targetTagId = existingTag?.id ?? randomUUID();
+          if (!existingTag)
+            await tx.insert(tags).values({
+              id: targetTagId,
+              libraryId: targetSetlistId,
+              name: tag.name,
+              normalizedName: tag.normalizedName,
+              color: tag.color,
+            });
+          await tx
+            .insert(songTags)
+            .values({ libraryId: targetSetlistId, songId: id, tagId: targetTagId });
+        }
         const files = await tx
           .select()
           .from(attachments)
@@ -329,7 +356,7 @@ export function registerSetlistRoutes(app: FastifyInstance, auth: AuthConfig) {
           .set({ revision: sql`${libraries.revision}+1`, updatedAt: new Date() })
           .where(eq(libraries.id, targetSetlistId));
         return {
-          ...songDto(song),
+          ...songDto(song, await songTagIds(tx, targetSetlistId, id)),
           attachments: (await tx.select().from(attachments).where(eq(attachments.songId, id))).map(
             (file) => ({
               id: file.id,

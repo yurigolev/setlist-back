@@ -3,6 +3,8 @@ import {
   check,
   index,
   integer,
+  foreignKey,
+  primaryKey,
   pgTable,
   text,
   timestamp,
@@ -48,6 +50,49 @@ export const songs = pgTable(
     check('song_revision_positive', sql`${table.revision} > 0`),
     uniqueIndex('songs_library_create_key').on(table.libraryId, table.createKey),
     index('songs_library_id').on(table.libraryId),
+    uniqueIndex('songs_library_identity').on(table.libraryId, table.id),
+  ],
+);
+
+export const tags = pgTable(
+  'tags',
+  {
+    id: uuid('id').primaryKey(),
+    libraryId: uuid('library_id')
+      .notNull()
+      .references(() => libraries.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 40 }).notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    color: varchar('color', { length: 7 }),
+  },
+  (table) => [
+    uniqueIndex('tags_library_name').on(table.libraryId, table.normalizedName),
+    uniqueIndex('tags_library_identity').on(table.libraryId, table.id),
+    check('tag_name_length', sql`char_length(${table.name}) between 1 and 40`),
+    check('tag_color_hex', sql`${table.color} ~ '^#[0-9A-F]{6}$'`),
+  ],
+);
+
+export const songTags = pgTable(
+  'song_tags',
+  {
+    libraryId: uuid('library_id').notNull(),
+    songId: uuid('song_id').notNull(),
+    tagId: uuid('tag_id').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.libraryId, table.songId, table.tagId] }),
+    foreignKey({
+      columns: [table.libraryId, table.songId],
+      foreignColumns: [songs.libraryId, songs.id],
+      name: 'song_tags_song_fk',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.libraryId, table.tagId],
+      foreignColumns: [tags.libraryId, tags.id],
+      name: 'song_tags_tag_fk',
+    }).onDelete('cascade'),
+    index('song_tags_library_tag').on(table.libraryId, table.tagId),
   ],
 );
 
