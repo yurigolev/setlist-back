@@ -52,7 +52,7 @@ test('Yandex authorization uses code, exact callback, state and S256; token stay
   assert.equal(url.searchParams.get('client_id'), config.clientId);
   assert.equal(url.searchParams.get('redirect_uri'), config.redirectUri);
   assert.equal(url.searchParams.get('response_type'), 'code');
-  assert.equal(url.searchParams.get('scope'), 'login:info');
+  assert.equal(url.searchParams.get('scope'), 'login:info login:avatar');
   assert.equal(url.searchParams.get('state'), 'random-state');
   assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
   assert.equal(
@@ -92,6 +92,44 @@ test('Yandex authorization uses code, exact callback, state and S256; token stay
   }
   assert.ok(!JSON.stringify(identity).includes(token.access_token));
   assert.ok(!JSON.stringify(identity).includes(token.refresh_token));
+});
+
+test('Yandex avatar is mapped to a public picture URL without exposing provider tokens', async () => {
+  const identity = await service({
+    ...profile,
+    is_avatar_empty: false,
+    default_avatar_id: '123456/opaque-avatar_1',
+  }).authenticate('code', 'verifier');
+  assert.equal(
+    identity.picture,
+    'https://avatars.yandex.net/get-yapic/123456/opaque-avatar_1/islands-200',
+  );
+  assert.ok(!JSON.stringify(identity).includes(token.access_token));
+  assert.ok(!JSON.stringify(identity).includes(token.refresh_token));
+});
+
+test('Yandex missing, placeholder and malformed avatars do not prevent login or set picture', async () => {
+  for (const fields of [
+    {},
+    { is_avatar_empty: true, default_avatar_id: '0/0-0' },
+    { default_avatar_id: '123456/avatar' },
+    ...[
+      undefined,
+      null,
+      123,
+      '',
+      ' ',
+      '../avatar',
+      'id?query',
+      'id#fragment',
+      'id\n',
+      'a'.repeat(256),
+    ].map((default_avatar_id) => ({ is_avatar_empty: false, default_avatar_id })),
+  ]) {
+    const identity = await service({ ...profile, ...fields }).authenticate('code', 'verifier');
+    assert.equal(identity.subject, profile.id);
+    assert.equal('picture' in identity, false);
+  }
 });
 
 test('Yandex profile binds exact client and opaque string ID; names and email never determine identity', async () => {
