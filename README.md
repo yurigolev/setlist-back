@@ -42,4 +42,6 @@ Use Node.js 22.22.1 or newer (CI and Docker use Node.js 24). Run `npm ci` to ins
 
 Use `npm run lint` / `npm run lint:fix` for lint checks or fixes, and `npm run format:check` / `npm run format` for formatting checks or fixes. Generated Drizzle metadata, build output, dependencies and backups are excluded. Set `HUSKY=0` when installing in CI or Docker.
 
+ESLint uses the recommended JavaScript and TypeScript presets; `eslint-config-prettier` disables conflicting formatting rules. Prettier uses two spaces, single quotes, semicolons, trailing commas, a 100-character print width, and LF endings. EditorConfig and `.gitattributes` keep editor and Git settings consistent. CI runs `lint` and `format:check` across the project before integration tests.
+
 The application compiler stays on TypeScript 7 via the `typescript-compiler` npm alias; `build` and `typecheck` explicitly invoke that compiler. The `typescript` dependency provides TypeScript 6 for ESLint because typescript-eslint currently supports TypeScript versions below 6.1 and needs the JavaScript compiler API. No legacy peer dependency installation is required.

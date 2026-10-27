@@ -18,6 +18,8 @@ jobs:
       - run: npm ci
         env:
           HUSKY: 0
+      - run: npm run lint
+      - run: npm run format:check
       - name: Isolated authenticated integration and regression tests
         run: npm run test:qa
       - name: Trusted proxy chain and forwarding spoof protection
