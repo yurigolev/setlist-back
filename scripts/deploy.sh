@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Install root-owned as /usr/local/sbin/setlist-deploy; allow sudo only this command.
 set -Eeuo pipefail
-if [[ $# != 2 || ! $2 =~ ^[0-9a-f]{40}$ ]]; then
-  echo 'Usage: setlist-deploy frontend|backend <40-character commit SHA>' >&2
+if [[ $# -lt 2 || $# -gt 3 || ! $2 =~ ^[0-9a-f]{40}$ || ($# == 3 && $3 != --env-stdin) ]]; then
+  echo 'Usage: setlist-deploy frontend|backend <40-character commit SHA> [--env-stdin]' >&2
   exit 2
 fi
 case "$1" in
@@ -15,17 +15,93 @@ cd /opt/setlist
 exec 9>/opt/setlist/deploy.lock
 flock -w 600 9 || { echo 'Another deployment/backup is running' >&2; exit 1; }
 env_file=/opt/setlist/.env.production
-compose=(docker compose --env-file "$env_file" -f /opt/setlist/docker-compose.prod.yml)
-domain=$(sed -n 's/^APP_DOMAIN=//p' "$env_file")
+umask 077
+saved=$(mktemp /opt/setlist/.env.rollback.XXXXXX)
+candidate=$(mktemp /opt/setlist/.env.incoming.XXXXXX)
+cp "$env_file" "$saved"
+applied=false
+succeeded=false
+changed=false
+compose=(docker compose --env-file "$candidate" -f /opt/setlist/docker-compose.prod.yml)
+services=(--no-deps "$service")
+cleanup() {
+  status=$?
+  trap - EXIT
+  if $applied && ! $succeeded; then
+    echo 'Deployment failed; restoring previous environment and images. Database migrations are not reversed.' >&2
+    cp "$saved" "$env_file"
+    docker compose --env-file "$env_file" -f /opt/setlist/docker-compose.prod.yml \
+      up -d --no-build --pull never --wait --wait-timeout 180 "${services[@]}" || status=1
+  fi
+  rm -f "$saved" "$candidate"
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+cp "$env_file" "$candidate"
+if [[ ${3:-} == --env-stdin ]]; then
+  cat > "$candidate"
+fi
+# Treat incoming dotenv as data, never source/eval it. Keep release tags server-owned.
+# Reject Compose control variables and accidental credential changes for existing data.
+if ! changed=$(python3 - "$saved" "$candidate" "$variable" "$repository:$2" <<'PYENV'
+import pathlib
+import re
+import sys
+
+allowed = set("""APP_DOMAIN PWA_ORIGIN TRUSTED_PROXY_CHAIN POSTGRES_USER POSTGRES_PASSWORD
+POSTGRES_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD MINIO_BUCKET MAX_IMAGE_BYTES MAX_MP3_BYTES
+YANDEX_CLIENT_ID YANDEX_CLIENT_SECRET YANDEX_REDIRECT_URI TELEGRAM_CLIENT_ID
+TELEGRAM_CLIENT_SECRET TELEGRAM_REDIRECT_URI AUTH_SESSION_TTL_SECONDS
+AUTH_REFRESH_TTL_SECONDS AUTH_ALLOW_INSECURE_LOCAL_HTTP""".split())
+images = {'FRONTEND_IMAGE', 'BACKEND_IMAGE'}
+def read(path):
+    result = {}
+    for line in pathlib.Path(path).read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        key, sep, value = line.partition('=')
+        if not sep or key not in allowed | images or key in result:
+            sys.exit('Invalid, duplicate or unsupported production environment key')
+        result[key] = value
+    return result
+old = read(sys.argv[1])
+new = read(sys.argv[2])
+if not any(key in allowed and value.strip() for key, value in new.items()):
+    sys.exit('Production environment is empty')
+for key in ('POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'MINIO_BUCKET'):
+    if new.get(key) != old.get(key):
+        sys.exit(f'{key} requires a separate data/credential migration')
+for key, repo in [('FRONTEND_IMAGE', 'setlist-front-pwa'), ('BACKEND_IMAGE', 'setlist-back')]:
+    value = old.get(key, '')
+    if not re.fullmatch(r'ghcr.io/yurigolev/' + repo + r':[0-9a-f]{40}', value):
+        sys.exit('Missing or invalid installed image tag')
+    new[key] = value
+changed = {k: v for k, v in old.items() if k not in images} != {k: v for k, v in new.items() if k not in images}
+new[sys.argv[3]] = sys.argv[4]
+pathlib.Path(sys.argv[2]).write_text(''.join(f'{key}={value}\n' for key, value in new.items()))
+print('true' if changed else 'false')
+PYENV
+); then
+  exit 1
+fi
+if ! "${compose[@]}" config --quiet >/dev/null 2>&1; then
+  echo 'Invalid production Compose environment; deployment aborted' >&2
+  exit 1
+fi
+if $changed; then
+  # Apply changed settings to every affected service, including API on frontend deploys.
+  services=(postgres minio api frontend caddy)
+fi
+domain=$(sed -n 's/^APP_DOMAIN=//p' "$candidate")
 [[ $domain =~ ^[a-zA-Z0-9.-]+$ ]] || { echo 'Missing or invalid APP_DOMAIN' >&2; exit 1; }
-previous=$(sed -n "s/^${variable}=//p" "$env_file")
-[[ $previous == "$repository":* ]] || { echo 'Missing previous image configuration' >&2; exit 1; }
 image="$repository:$2"
 docker pull "$image"
-if [[ $service == api ]]; then
+if [[ $service == api ]] || $changed; then
   # Validate the new image with the installed Compose/env before pausing writers.
   # Override CMD: this preflight imports configuration without running migrations.
-  BACKEND_IMAGE="$image" "${compose[@]}" run --rm --no-deps -T api node --input-type=module -e '
+  "${compose[@]}" run --rm --no-deps -T api node --input-type=module -e '
     const { config } = await import("./dist/config.js");
     const auth = config.auth;
     const expected = `${config.pwaOrigin}/v1/auth/yandex/callback`;
@@ -54,19 +130,14 @@ if [[ $service == api ]]; then
   '
   /usr/local/sbin/setlist-backup --lock-held
 fi
-# Preserve settings so a failed replacement can restore the complete env file.
-saved=$(mktemp /opt/setlist/.env.rollback.XXXXXX)
-chmod 600 "$saved"
-cp "$env_file" "$saved"
-cleanup() { rm -f "$saved"; }
-trap cleanup EXIT
-sed -i "s|^${variable}=.*|${variable}=${image}|" "$env_file"
-if "${compose[@]}" up -d --no-deps --no-build --pull never --wait --wait-timeout 180 "$service" && curl --fail --silent --show-error --connect-timeout 10 --max-time 20 --resolve "$domain:443:127.0.0.1" "https://$domain/health" >/dev/null; then
-  printf '%s %s %s\n' "$(date -u +%FT%TZ)" "$1" "$2" >> /opt/setlist/deployments.log
-  echo "Deployed $1 $2"
-else
-  echo 'Deployment failed; restoring previous image. Database migrations are not reversed.' >&2
-  cp "$saved" "$env_file"
-  "${compose[@]}" up -d --no-deps --no-build --pull never --wait --wait-timeout 180 "$service"
-  exit 1
-fi
+# Backups and preflight used the previous live env and the candidate, respectively.
+# Replace on the same filesystem; mode remains 600 and ownership remains root.
+mv -f "$candidate" "$env_file"
+applied=true
+compose=(docker compose --env-file "$env_file" -f /opt/setlist/docker-compose.prod.yml)
+"${compose[@]}" up -d --no-build --pull never --wait --wait-timeout 180 "${services[@]}"
+curl --fail --silent --show-error --connect-timeout 10 --max-time 20 \
+  --resolve "$domain:443:127.0.0.1" "https://$domain/health" >/dev/null
+printf '%s %s %s\n' "$(date -u +%FT%TZ)" "$1" "$2" >> /opt/setlist/deployments.log
+succeeded=true
+echo "Deployed $1 $2"
