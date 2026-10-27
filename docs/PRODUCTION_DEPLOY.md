@@ -8,7 +8,8 @@ Backend deployment files live in `/opt/setlist`:
 
 - `docker-compose.prod.yml` and `Caddyfile`, owned by root. Caddy publishes ports
   80/443; frontend publishes only `127.0.0.1:8080` for local diagnostics.
-- `.env.production`, owned by root, mode 600; generate separate database and MinIO
+- `.env.production`, owned by root, mode 600, materialized from GitHub Actions secret
+  `PRODUCTION_ENV` during deployment; generate separate database and MinIO
   passwords with `openssl rand -hex 32` and configure both initial image tags.
   Set `APP_DOMAIN=setlivo.ru` and `PWA_ORIGIN=https://setlivo.ru`.
 - `/usr/local/sbin/setlist-deploy`, installed from `scripts/deploy.sh`, owned by
@@ -30,6 +31,48 @@ outside the VPS as well.
 In both GitHub repositories set Actions variables `DEPLOY_HOST`, `DEPLOY_USER`,
 `DEPLOY_PORT`, and secrets `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`. Verify the VPS host
 key before saving known_hosts. No passwords or private keys belong in Git.
+
+### Production environment in GitHub Secrets
+
+Both repositories must have the same multiline Actions secret `PRODUCTION_ENV`.
+Use the installed production dotenv contents, excluding `FRONTEND_IMAGE` and
+`BACKEND_IMAGE`; `.env.production.example` documents the keys. Preserve existing
+credentials when migrating. This is one complete dotenv document, not a JSON object.
+Update both copies together; a later deployment applies its repository’s copy.
+Never put real values in a committed file or workflow.
+
+To upload a private file without exposing its contents in arguments or logs:
+
+```sh
+gh secret set PRODUCTION_ENV -R yurigolev/setlist-back < /secure/path/production.env
+gh secret set PRODUCTION_ENV -R yurigolev/setlist-front-pwa < /secure/path/production.env
+```
+
+The deploy job passes the secret through the verified SSH connection on stdin to
+`sudo -n /usr/local/sbin/setlist-deploy COMPONENT SHA --env-stdin`. The server must
+have Python 3 and the updated root-owned deploy script installed before merging
+the workflows. Existing sudo permissions for the script also cover this flag.
+
+Under the deployment lock, the script creates a root-only candidate, rejects empty,
+duplicate and unsupported keys, validates Compose without printing resolved values,
+and preserves both installed image tags except the component being released. It
+never evaluates dotenv as shell code. Comments and blank lines are allowed; each
+assignment must occupy one line. The server atomically replaces `.env.production`
+only after preflight and any required backup. The file remains root-owned, mode 600.
+
+Changed settings trigger API preflight, a backup with the previous environment,
+and Compose reconciliation of PostgreSQL, MinIO, API, frontend and Caddy. Unchanged
+settings update only the released component. Failed startup or HTTPS healthcheck
+restores the previous complete env and reconciles the same services. Database
+migrations are not reversed. Do not change `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+`POSTGRES_DB` or `MINIO_BUCKET` through this mechanism: existing persistent data
+requires a separate migration. OAuth and MinIO credentials can be updated in the
+secret and applied at the next deployment.
+
+The server retains the runtime file for restarts, backups and emergency manual
+image rollback. Manual `setlist-deploy COMPONENT SHA` without `--env-stdin` keeps
+its existing settings. GitHub owns desired settings; manual server edits will be
+replaced by the next workflow deployment.
 
 The GHCR packages must be public for anonymous VPS pulls. Source repository
 visibility does not automatically make its GHCR package public. Alternatively,

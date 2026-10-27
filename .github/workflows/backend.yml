@@ -20,6 +20,8 @@ jobs:
           HUSKY: 0
       - run: npm run lint
       - run: npm run format:check
+      - name: Deployment environment transaction and rollback tests
+        run: python3 scripts/test-deploy.py
       - name: Isolated authenticated integration and regression tests
         run: npm run test:qa
       - name: Trusted proxy chain and forwarding spoof protection
@@ -68,6 +70,7 @@ jobs:
           DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
         shell: bash
         run: |
           set -euo pipefail
@@ -82,6 +85,7 @@ jobs:
           DEPLOY_PORT=${DEPLOY_PORT:-22}
           [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          : "${PRODUCTION_ENV:?Set PRODUCTION_ENV repository secret}"
           umask 077
           mkdir -p ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
@@ -90,4 +94,4 @@ jobs:
           ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o ConnectTimeout=20 "$DEPLOY_USER@$DEPLOY_HOST" \
-            "sudo /usr/local/sbin/setlist-deploy backend $RELEASE_SHA"
+            "sudo -n /usr/local/sbin/setlist-deploy backend $RELEASE_SHA --env-stdin" <<< "$PRODUCTION_ENV"
